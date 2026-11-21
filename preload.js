@@ -1,0 +1,44 @@
+'use strict';
+const { contextBridge, ipcRenderer } = require('electron');
+
+const invoke = (ch, ...a) => ipcRenderer.invoke(ch, ...a);
+
+contextBridge.exposeInMainWorld('api', {
+  info: () => invoke('app:info'),
+  listSources: (opts) => invoke('sources:list', opts),
+  pickFolder: (cur) => invoke('dialog:folder', cur),
+  pickImage: () => invoke('dialog:image'),
+  readFile: (p) => invoke('file:read', p),
+  showInFolder: (p) => invoke('shell:show', p),
+  openDir: (p) => invoke('shell:openDir', p),
+  openFile: (p) => invoke('shell:openFile', p),
+  saveShot: (o) => invoke('shot:save', o),
+
+  recOpen: (o) => invoke('rec:open', o),
+  recWrite: (id, buf) => ipcRenderer.send('rec:write', id, buf),
+  recClose: (id, o) => invoke('rec:close', id, o),
+  onRecProgress: (cb) => ipcRenderer.on('rec:progress', (_e, d) => cb(d)),
+
+  probeEncoders: () => invoke('enc:probe'),
+  encStart: (o) => invoke('enc:start', o),
+  encFrame: (id, idx, buf) => ipcRenderer.send('enc:frame', id, idx, buf),
+  encAudio: (id, buf) => ipcRenderer.send('enc:audio', id, buf),
+  encSize: (id) => invoke('enc:size', id),
+  encStop: (id, o) => invoke('enc:stop', id, o),
+  onEncDied: (cb) => ipcRenderer.on('enc:died', (_e, d) => cb(d)),
+
+  setHotkeys: (map) => invoke('hotkeys:set', map),
+  onHotkey: (cb) => ipcRenderer.on('hotkey', (_e, a) => cb(a)),
+
+  protect: (on) => invoke('win:protect', on),
+  minimize: () => invoke('win:minimize'),
+  restore: () => invoke('win:restore'),
+  fullscreen: (on) => invoke('win:fullscreen', on),
+  quit: () => invoke('app:quit'),
+  setBusy: (b) => ipcRenderer.send('app:busy', !!b),
+  onRequestClose: (cb) => ipcRenderer.on('request-close', () => cb()),
+  stats: (dir) => invoke('stats', dir),
+
+  selftestShot: (f) => invoke('selftest:shot', f),
+  selftestDone: (r) => invoke('selftest:done', r),
+});

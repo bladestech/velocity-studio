@@ -1,0 +1,94 @@
+import { state, load, save, on, activeScene, newItem, emit, BASE_W, BASE_H } from './store.js';
+import { sleep } from './util.js';
+import * as compositor from './compositor.js';
+import * as audio from './audio.js';
+import * as resources from './resources.js';
+import * as preview from './preview.js';
+import * as ui from './ui.js';
+import * as recorder from './recorder.js';
+import * as cmd from './commands.js';
+import { fitWhenReady } from './actions.js';
+import { setAppInfo, applyHotkeys } from './settings.js';
+import { toast } from './widgets.js';
+
+async function boot() {
+  const info = await window.api.info();
+  setAppInfo(info);
+  load();
+  if (!state.settings.recPath) state.settings.recPath = info.defaultRecDir;
+  if (info.outDir) state.settings.recPath = info.outDir; // selftest only
+
+  compositor.init();
+  audio.init();
+  preview.init();
+  ui.init();
+  preview.bindEvents(on);
+
+  if (state.firstRun) {
+    try {
+      const screens = await window.api.listSources({ types: ['screen'], thumb: 2 });
+      if (screens[0]) {
+        const item = newItem('display', 'Display Capture', { sourceId: screens[0].id, label: screens[0].name }, BASE_W, BASE_H);
+        activeScene().items.push(item);
+        state.selectedItemId = item.id;
+        emit('items');
+        fitWhenReady(item);
+      }
+    } catch { /* no displays available */ }
+    save();
+  }
+
+  resources.sync();
+  audio.syncChannels();
+  emit('scenes'); emit('items'); emit('audio');
+  window.api.protect(state.settings.hideFromCapture);
+  applyHotkeys();
+
+  window.api.onHotkey((a) => {
+    if (a === 'record') cmd.toggleRecording();
+    else if (a === 'pause') cmd.togglePause();
+    else if (a === 'screenshot') cmd.takeScreenshot();
+  });
+  window.api.onRequestClose(() => cmd.quitApp());
+  window.api.onEncDied((d) => {
+    if (recorder.rec.ff && recorder.rec.id === d.id && recorder.isActive()) {
+      toast(`The hardware encoder stopped: ${d.error}`, { kind: 'error', timeout: 10000 });
+      cmd.stopRecording();
+    }
+  });
+  recorder.probeHardware();
+  on('recording', (e) => window.api.setBusy(e.detail.phase !== 'idle'));
+
+  if (!recorder.supportedEncoders().length) toast('No supported video encoder found in this build.', { kind: 'error', timeout: 0 });
+  if (!info.ffmpeg) toast('ffmpeg is missing — recordings stay in their native format (still playable).', { kind: 'warn', timeout: 8000 });
+
+  if (info.selftest) runSelfTest();
+}
+
+async function runSelfTest() {
+  const result = { steps: [] };
+  const step = (s) => result.steps.push(s);
+  try {
+    await sleep(3500);
+    const item = activeScene().items[0];
+    const res = item && resources.getRes(item);
+    step(`source status: ${res ? res.status : 'none'} ${res ? `${res.width}x${res.height}` : ''} ${res && res.error ? res.error : ''}`);
+    await window.api.selftestShot('selftest-idle.png');
+    await cmd.startRecording();
+    step(`phase after start: ${recorder.rec.phase}`);
+    await sleep(2500);
+    await window.api.selftestShot('selftest-recording.png');
+    await sleep(2500);
+    step(`measured fps: ${compositor.getFps().toFixed(1)}`);
+    const out = await recorder.stop();
+    result.output = out;
+  } catch (err) {
+    result.error = String(err && err.stack || err);
+  }
+  await window.api.selftestDone(result);
+}
+
+boot().catch((err) => {
+  console.error(err);
+  document.body.insertAdjacentHTML('beforeend', `<pre style="position:fixed;inset:40px;color:#ff8a80;background:#000;padding:16px;overflow:auto">Startup error:\n${String(err && err.stack || err)}</pre>`);
+});
