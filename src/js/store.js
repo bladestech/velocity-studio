@@ -15,8 +15,10 @@ export const DEFAULT_SETTINGS = {
   outputHeight: 1080,
   minimizeOnRecord: false,
   hideFromCapture: true,
-  hotkeys: { record: 'F9', pause: 'F10', screenshot: 'F11' },
+  hotkeys: { record: 'F9', pause: 'F10', screenshot: 'F11', stream: '' },
   nvenc: { preset: 'p5', rc: 'vbr', cq: 21 },
+  // Stream keys are NOT stored here (see stream.js / main.js secrets).
+  stream: { service: 'twitch', servers: {}, bitrate: 6000, audioBitrate: 160, height: 0, fps: 0, encoder: 'auto', reconnect: true },
 };
 
 export const state = {
@@ -82,7 +84,7 @@ export function load() {
   try { saved = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch { saved = null; }
   if (saved && Array.isArray(saved.scenes) && saved.scenes.length) {
     state.firstRun = false;
-    state.settings = { ...deepClone(DEFAULT_SETTINGS), ...saved.settings, hotkeys: { ...DEFAULT_SETTINGS.hotkeys, ...(saved.settings || {}).hotkeys }, nvenc: { ...DEFAULT_SETTINGS.nvenc, ...(saved.settings || {}).nvenc } };
+    state.settings = { ...deepClone(DEFAULT_SETTINGS), ...saved.settings, hotkeys: { ...DEFAULT_SETTINGS.hotkeys, ...(saved.settings || {}).hotkeys }, nvenc: { ...DEFAULT_SETTINGS.nvenc, ...(saved.settings || {}).nvenc }, stream: { ...deepClone(DEFAULT_SETTINGS.stream), ...(saved.settings || {}).stream } };
     state.scenes = saved.scenes;
     state.activeSceneId = saved.activeSceneId && saved.scenes.some((s) => s.id === saved.activeSceneId) ? saved.activeSceneId : saved.scenes[0].id;
     state.audio = Array.isArray(saved.audio) && saved.audio.length ? saved.audio : defaultAudio();

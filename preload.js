@@ -27,6 +27,15 @@ contextBridge.exposeInMainWorld('api', {
   encStop: (id, o) => invoke('enc:stop', id, o),
   onEncDied: (cb) => ipcRenderer.on('enc:died', (_e, d) => cb(d)),
 
+  streamStart: (o) => invoke('stream:start', o),
+  streamFrame: (id, buf) => ipcRenderer.send('stream:frame', id, buf),
+  streamAudio: (id, buf) => ipcRenderer.send('stream:audio', id, buf),
+  streamStop: (id) => invoke('stream:stop', id),
+  onStreamStatus: (cb) => ipcRenderer.on('stream:status', (_e, d) => cb(d)),
+  secretAvailable: () => invoke('secret:available'),
+  secretSet: (name, v) => invoke('secret:set', name, v),
+  secretGet: (name) => invoke('secret:get', name),
+
   setHotkeys: (map) => invoke('hotkeys:set', map),
   onHotkey: (cb) => ipcRenderer.on('hotkey', (_e, a) => cb(a)),
 

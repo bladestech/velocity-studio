@@ -7,6 +7,7 @@ import * as preview from './preview.js';
 import * as ui from './ui.js';
 import * as recorder from './recorder.js';
 import * as cmd from './commands.js';
+import * as stream from './stream.js';
 import { fitWhenReady } from './actions.js';
 import { setAppInfo, applyHotkeys } from './settings.js';
 import { toast } from './widgets.js';
@@ -48,6 +49,16 @@ async function boot() {
     if (a === 'record') cmd.toggleRecording();
     else if (a === 'pause') cmd.togglePause();
     else if (a === 'screenshot') cmd.takeScreenshot();
+    else if (a === 'stream') cmd.toggleStreaming();
+  });
+  window.api.onStreamStatus((d) => stream.handleStatus(d));
+  let announcedReconnect = false;
+  on('streaming', (e) => {
+    const d = e.detail;
+    if (d.phase === 'idle' && d.error) toast(`Stream stopped: ${d.error}`, { kind: 'error', timeout: 12000 });
+    if (d.phase === 'reconnecting' && !announcedReconnect) { announcedReconnect = true; toast('Connection to the streaming server was lost — trying to reconnect…', { kind: 'warn', timeout: 6000 }); }
+    if (d.phase === 'live' || d.phase === 'idle') announcedReconnect = false;
+    window.api.setBusy(recorder.rec.phase !== 'idle' || d.phase !== 'idle');
   });
   window.api.onRequestClose(() => cmd.quitApp());
   window.api.onEncDied((d) => {
@@ -57,7 +68,7 @@ async function boot() {
     }
   });
   recorder.probeHardware();
-  on('recording', (e) => window.api.setBusy(e.detail.phase !== 'idle'));
+  on('recording', (e) => window.api.setBusy(e.detail.phase !== 'idle' || stream.isActive()));
 
   if (!recorder.supportedEncoders().length) toast('No supported video encoder found in this build.', { kind: 'error', timeout: 0 });
   if (!info.ffmpeg) toast('ffmpeg is missing — recordings stay in their native format (still playable).', { kind: 'warn', timeout: 8000 });

@@ -9,6 +9,7 @@ import * as audio from './audio.js';
 import * as recorder from './recorder.js';
 import * as compositor from './compositor.js';
 import * as cmd from './commands.js';
+import * as stream from './stream.js';
 import { getRes } from './resources.js';
 import { openSettings, openShortcuts, openAbout } from './settings.js';
 
@@ -211,6 +212,25 @@ function updateControls(detail = {}) {
   document.body.classList.toggle('is-active-rec', phase === 'recording' || phase === 'paused');
 }
 
+function updateStreamControls() {
+  const phase = stream.st.phase;
+  const btn = $('#btn-stream');
+  const live = phase === 'live';
+  const busy = phase === 'connecting' || phase === 'reconnecting' || phase === 'stopping';
+  btn.classList.toggle('live', live);
+  btn.classList.toggle('busy', busy);
+  btn.disabled = phase === 'stopping';
+  const label = {
+    idle: 'Start Streaming', connecting: 'Connecting… (cancel)', live: 'Stop Streaming',
+    reconnecting: `Reconnecting… (${stream.st.attempt})`, stopping: 'Stopping…',
+  }[phase];
+  btn.innerHTML = (phase === 'idle' || busy ? icon('stream', 18) : icon('stop', 18)) + `<span>${label}</span>`;
+  $('#live-badge').hidden = phase === 'idle';
+  $('#live-label').textContent = live ? 'LIVE' : phase === 'reconnecting' ? 'RECONNECTING' : phase === 'stopping' ? 'STOPPING' : 'CONNECTING';
+  $('#live-dot').className = `rec-dot ${phase === 'reconnecting' ? 'reconnecting' : 'live'}`;
+  document.body.classList.toggle('is-live', live);
+}
+
 /* ===================== Status bar ===================== */
 let lastStats = { cpu: 0, free: null };
 async function pollStats() {
@@ -218,6 +238,13 @@ async function pollStats() {
 }
 function renderStatus() {
   const active = recorder.isActive();
+  if (stream.st.phase !== 'idle') {
+    $('#live-time').textContent = fmtTime(stream.elapsed());
+    const s = stream.st;
+    $('#live-info').textContent = s.phase === 'live'
+      ? `${s.serviceName} · ${(s.kbps / 1000).toFixed(1)} Mbps${s.dropped ? ` · ${s.dropped} dropped` : ''}`
+      : (s.phase === 'reconnecting' && s.error ? s.error.slice(0, 70) : s.serviceName);
+  }
   $('#rec-time').textContent = fmtTime(recorder.elapsed());
   $('#rec-size').textContent = active ? `${fmtBytes(recorder.rec.bytes)}${recorder.rec.dropped ? ` · ${recorder.rec.dropped} dropped` : ''}` : '';
   const sz = compositor.getSize();
@@ -251,6 +278,7 @@ function setupMenus() {
       { label: 'Source Properties…', icon: 'gear', disabled: !selectedItem(), onClick: () => selectedItem() && A.editSource(selectedItem()) },
     ],
     Tools: () => [
+      { label: stream.isActive() ? 'Stop Streaming' : 'Start Streaming', icon: 'stream', hint: state.settings.hotkeys.stream, onClick: cmd.toggleStreaming },
       { label: 'Take Screenshot', icon: 'shot', hint: state.settings.hotkeys.screenshot, onClick: cmd.takeScreenshot },
       { label: 'Add Audio Channel…', icon: 'mic', onClick: A.addAudioChannel },
       { label: 'Retry Failed Sources', icon: 'refresh', onClick: () => import('./resources.js').then((m) => m.retryFailed()) },
@@ -290,6 +318,7 @@ export function init() {
   $('#btn-up-source').onclick = () => { const it = selectedItem(); if (it) A.moveItem(it, 'up'); };
   $('#btn-down-source').onclick = () => { const it = selectedItem(); if (it) A.moveItem(it, 'down'); };
   $('#btn-add-audio').onclick = () => A.addAudioChannel();
+  $('#btn-stream').onclick = () => cmd.toggleStreaming();
   $('#btn-record').onclick = () => cmd.toggleRecording();
   $('#btn-pause').onclick = () => cmd.togglePause();
   $('#btn-shot').onclick = () => cmd.takeScreenshot();
@@ -303,10 +332,11 @@ export function init() {
   on('selection', highlightSelection);
   on('audio', renderMixer);
   on('recording', (e) => updateControls(e.detail));
+  on('streaming', updateStreamControls);
   window.api.onRecProgress((d) => updateControls({ pct: d.pct }));
   on('itemmenu', (e) => itemMenu(e.detail.item, e.detail.x, e.detail.y));
 
-  renderScenes(); renderSources(); renderMixer(); updateControls();
+  renderScenes(); renderSources(); renderMixer(); updateControls(); updateStreamControls();
   setupMenus();
   requestAnimationFrame(drawMeters);
   pollStats();

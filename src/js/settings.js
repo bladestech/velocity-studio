@@ -7,6 +7,9 @@ import { hasNvenc } from './recorder.js';
 import * as compositor from './compositor.js';
 import { resetAll, sync } from './resources.js';
 import { icon } from './icons.js';
+import * as audio from './audio.js';
+import * as stream from './stream.js';
+import { hasNvencH264 } from './recorder.js';
 
 let appInfo = null;
 export const setAppInfo = (i) => { appInfo = i; };
@@ -20,7 +23,7 @@ export async function applyHotkeys() {
 
 export function openSettings() {
   const d = deepClone(state.settings);
-  const locked = recorder.rec.phase !== 'idle';
+  const locked = recorder.rec.phase !== 'idle' || stream.isActive();
   const encs = recorder.supportedEncoders();
 
   /* ---- Output ---- */
@@ -72,19 +75,37 @@ export function openSettings() {
   if (locked) { resSel.disabled = true; fpsSel.disabled = true; }
   const video = h('div', { class: 'pane' },
     h('div', { class: 'grid2' }, field('Output resolution', resSel), field('Frame rate', fpsSel)),
-    locked ? h('p', { class: 'note warn' }, 'Stop recording to change the resolution or frame rate.') : null,
+    locked ? h('p', { class: 'note warn' }, 'Stop recording and streaming to change the resolution or frame rate.') : null,
     h('p', { class: 'note' }, 'Scenes are laid out on a 16:9 canvas and scaled to the output resolution. Higher resolution and frame rate use more CPU/GPU — if the status bar shows fewer fps than selected, lower one of them or the bitrate.'),
   );
 
   /* ---- Audio ---- */
   const abSel = select([96, 128, 160, 192, 256, 320].map((v) => ({ value: v, label: `${v} kbps` })), d.audioBitrate, (v) => { d.audioBitrate = Number(v); });
+  // One source picker per mixer channel: System audio (loopback) or any capture device / virtual cable.
+  const chDraft = {};
+  const chRows = h('div', { class: 'ch-rows' });
+  const chSelects = state.audio.map((ch) => {
+    const sel = h('select', { class: 'select' }, h('option', { value: audio.sourceValue(ch) }, 'Loading devices…'));
+    chRows.append(h('div', { class: 'ch-row' }, h('div', { class: 'ch-row-name' }, ch.name), sel));
+    sel.addEventListener('change', () => { chDraft[ch.id] = sel.value; });
+    return { ch, sel };
+  });
+  audio.sourceOptions().then((opts) => {
+    for (const { ch, sel } of chSelects) {
+      const cur = audio.sourceValue(ch);
+      const list = opts.some((o) => o.value === cur) ? opts : [...opts, { value: cur, label: `${cur} (unavailable)` }];
+      sel.replaceChildren(...list.map((o) => { const el = h('option', { value: o.value }, o.label); if (o.value === cur) el.selected = true; return el; }));
+    }
+  }).catch(() => {});
   const audioPane = h('div', { class: 'pane' },
-    field('Audio bitrate', abSel),
-    h('p', { class: 'note' }, 'Audio channels (Desktop Audio, microphones) are managed in the Audio Mixer: use the gear button on a channel to change its device, or + to add more. All unmuted channels are mixed into the recording at 48 kHz stereo.'),
+    h('div', { class: 'field-label strong' }, 'Mixer sources'),
+    chRows,
+    h('p', { class: 'note' }, 'Pick a microphone or any other capture device per channel. “System audio” records everything you hear through the Windows default output device. To capture a different output or a single app, route it through a virtual audio cable (e.g. VB-Cable or Voicemeeter) and choose that cable here as a device. Add more channels with + in the Audio Mixer.'),
+    field('Recording audio bitrate', abSel),
   );
 
   /* ---- Hotkeys ---- */
-  const hkRows = [['record', 'Start / Stop Recording'], ['pause', 'Pause / Resume Recording'], ['screenshot', 'Take Screenshot']].map(([key, label]) => {
+  const hkRows = [['record', 'Start / Stop Recording'], ['pause', 'Pause / Resume Recording'], ['stream', 'Start / Stop Streaming'], ['screenshot', 'Take Screenshot']].map(([key, label]) => {
     const btn = h('button', { class: 'hotkey-btn', type: 'button' }, prettyAccel(d.hotkeys[key]) || 'Not set');
     const clear = h('button', { class: 'btn small', type: 'button', onclick: () => { d.hotkeys[key] = ''; btn.textContent = 'Not set'; } }, 'Clear');
     btn.addEventListener('click', () => {
@@ -123,7 +144,61 @@ export function openSettings() {
     }, 'Reset to defaults')),
   );
 
-  const tabs = [['Output', out], ['Video', video], ['Audio', audioPane], ['Hotkeys', hotkeys], ['General', general]];
+  /* ---- Stream ---- */
+  const sc = d.stream;
+  const streaming = stream.isActive();
+  const keyDraft = {}; // service id -> key typed in this dialog
+  let remember = true;
+  let secretOk = true;
+  const hint = h('p', { class: 'note' });
+  const serverIn = h('input', { type: 'text', class: 'text-input', placeholder: 'rtmp://… or rtmps://…', spellcheck: false });
+  const keyIn = h('input', { type: 'password', class: 'text-input', placeholder: 'Paste your stream key', autocomplete: 'off', spellcheck: false });
+  const showBtn = h('button', { class: 'btn', type: 'button' }, 'Show');
+  showBtn.addEventListener('click', () => { keyIn.type = keyIn.type === 'password' ? 'text' : 'password'; showBtn.textContent = keyIn.type === 'password' ? 'Show' : 'Hide'; });
+  serverIn.addEventListener('input', () => { sc.servers[sc.service] = serverIn.value.trim(); });
+  keyIn.addEventListener('input', () => { keyDraft[sc.service] = keyIn.value.trim(); });
+  const refreshService = async () => {
+    const svc = stream.serviceById(sc.service);
+    serverIn.value = sc.servers[svc.id] != null ? sc.servers[svc.id] : svc.server;
+    hint.textContent = svc.hint;
+    if (keyDraft[svc.id] !== undefined) { keyIn.value = keyDraft[svc.id]; return; }
+    keyIn.value = '';
+    keyIn.placeholder = 'Loading…';
+    const k = await stream.getKey(svc.id);
+    if (sc.service === svc.id && keyDraft[svc.id] === undefined) { keyIn.value = k; keyIn.placeholder = 'Paste your stream key'; }
+  };
+  const svcSel = select(stream.SERVICES.map((s) => ({ value: s.id, label: s.name })), sc.service, (v) => { sc.service = v; refreshService(); });
+  const secretNote = h('p', { class: 'note' }, 'Your stream key is stored encrypted with Windows (DPAPI) on this PC and never written to the settings file. Anyone with your key can stream to your channel — keep it private and reset it if it leaks.');
+  const rememberCb = checkbox('Remember stream keys on this PC', true, (v) => { remember = v; });
+  window.api.secretAvailable().then((ok) => {
+    secretOk = ok;
+    if (!ok) { rememberCb.input.checked = false; rememberCb.input.disabled = true; remember = false; secretNote.textContent = 'Encrypted storage is not available on this system, so your key is kept in memory only and must be re-entered after restarting RecScreen.'; }
+  });
+  const sBitrate = numberInput(sc.bitrate, { min: 500, max: 60000, step: 250, onChange: (v) => { sc.bitrate = v || 6000; } });
+  const sAudio = select([96, 128, 160, 192, 256].map((v) => ({ value: v, label: `${v} kbps` })), sc.audioBitrate, (v) => { sc.audioBitrate = Number(v); });
+  const sHeight = select([{ value: 0, label: 'Same as canvas' }, { value: 1080, label: '1920 × 1080' }, { value: 900, label: '1600 × 900' }, { value: 720, label: '1280 × 720' }, { value: 540, label: '960 × 540' }], sc.height, (v) => { sc.height = Number(v); });
+  const sFps = select([{ value: 0, label: 'Same as canvas' }, { value: 60, label: '60 fps' }, { value: 48, label: '48 fps' }, { value: 30, label: '30 fps' }, { value: 24, label: '24 fps' }], sc.fps, (v) => { sc.fps = Number(v); });
+  const sEnc = select([
+    { value: 'auto', label: hasNvencH264() ? 'Automatic (NVIDIA NVENC)' : 'Automatic (x264, CPU)' },
+    ...(hasNvencH264() ? [{ value: 'nvenc', label: 'NVIDIA NVENC H.264 (GPU)' }] : []),
+    { value: 'x264', label: 'x264 (CPU, veryfast)' },
+  ], sc.encoder, (v) => { sc.encoder = v; });
+  if (streaming) [sBitrate, sAudio, sHeight, sFps, sEnc].forEach((el) => { el.disabled = true; });
+  const streamPane = h('div', { class: 'pane' },
+    field('Service', svcSel),
+    hint,
+    field('Server', serverIn),
+    field('Stream key', h('div', { class: 'row' }, keyIn, showBtn)),
+    rememberCb, secretNote,
+    h('div', { class: 'grid2' }, field('Video bitrate (kbps, CBR)', sBitrate), field('Audio bitrate', sAudio)),
+    h('div', { class: 'grid2' }, field('Stream resolution', sHeight), field('Stream frame rate', sFps)),
+    h('div', { class: 'grid2' }, field('Encoder', sEnc), h('div', {}, h('div', { class: 'field-label' }, 'Connection'), checkbox('Reconnect automatically', sc.reconnect, (v) => { sc.reconnect = v; }))),
+    streaming ? h('p', { class: 'note warn' }, 'Stop streaming to change bitrate, resolution or encoder.') : null,
+    h('p', { class: 'note' }, 'Keyframes are sent every 2 seconds, as Twitch, YouTube and Kick require. Streaming and recording can run at the same time; with NVENC both share one GPU conversion.'),
+  );
+  refreshService();
+
+  const tabs = [['Output', out], ['Video', video], ['Audio', audioPane], ['Stream', streamPane], ['Hotkeys', hotkeys], ['General', general]];
   const nav = h('div', { class: 'tabs-nav' });
   const content = h('div', { class: 'tabs-content' });
   const buttons = [];
@@ -143,7 +218,27 @@ export function openSettings() {
     body: h('div', { class: 'settings-layout' }, nav, content),
     buttons: [
       { label: 'Cancel', value: null },
-      { label: 'Apply', primary: true, value: 'ok', onClick: () => { applySettings(d); } },
+      {
+        label: 'Apply',
+        primary: true,
+        value: 'ok',
+        onClick: async () => {
+          applySettings(d);
+          // audio source changes
+          let audioChanged = false;
+          for (const [id, value] of Object.entries(chDraft)) {
+            const ch = state.audio.find((c) => c.id === id);
+            if (ch && value !== audio.sourceValue(ch)) { audio.setSource(ch, value); audio.startChannel(ch); audioChanged = true; }
+          }
+          if (audioChanged) { emit('audio'); save(); }
+          // stream keys
+          for (const [id, key] of Object.entries(keyDraft)) {
+            if (remember && secretOk) { await window.api.secretSet(stream.keyName(id), key); delete stream.memoryKeys[id]; }
+            else { stream.memoryKeys[id] = key; if (secretOk) await window.api.secretSet(stream.keyName(id), ''); }
+            if (!key) delete stream.memoryKeys[id];
+          }
+        },
+      },
     ],
   });
 }
@@ -167,7 +262,7 @@ function applySettings(d) {
 export function openShortcuts() {
   const hk = state.settings.hotkeys;
   const rows = [
-    ['Start / Stop recording', prettyAccel(hk.record)], ['Pause / Resume', prettyAccel(hk.pause)], ['Take screenshot', prettyAccel(hk.screenshot)],
+    ['Start / Stop recording', prettyAccel(hk.record)], ['Pause / Resume', prettyAccel(hk.pause)], ['Start / Stop streaming', prettyAccel(hk.stream)], ['Take screenshot', prettyAccel(hk.screenshot)],
     ['Move selected source', 'Arrow keys (Shift = 10 px)'], ['Remove selected source', 'Delete'],
     ['Free-aspect resize', 'Shift + drag a corner'], ['Crop source', 'Alt + drag a handle'], ['Disable snapping', 'Hold Ctrl while dragging'],
     ['Reset volume', 'Double-click a fader'], ['Source properties', 'Double-click a source'],

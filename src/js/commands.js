@@ -4,6 +4,8 @@ import { formatName, fmtBytes, fmtTime } from './util.js';
 import * as recorder from './recorder.js';
 import * as compositor from './compositor.js';
 import { toast } from './widgets.js';
+import * as stream from './stream.js';
+import { openSettings } from './settings.js';
 
 export async function startRecording() {
   if (recorder.rec.phase !== 'idle') return;
@@ -50,11 +52,25 @@ export async function takeScreenshot() {
   });
 }
 
+export async function toggleStreaming() {
+  if (stream.st.phase === 'stopping') return;
+  if (stream.st.phase !== 'idle') { await stream.stop(); return; }
+  const r = await stream.start();
+  if (!r.ok) {
+    toast(r.error, {
+      kind: 'error',
+      timeout: 9000,
+      actions: r.needsSetup ? [{ label: 'Open Settings', onClick: openSettings }] : [],
+    });
+  }
+}
+
 export async function quitApp() {
   if (recorder.rec.phase === 'processing') {
     toast('Finishing your recording — RecScreen will be ready to close in a moment.', { kind: 'warn' });
     return;
   }
+  if (stream.isActive()) await stream.stop();
   if (recorder.isActive()) await stopRecording();
   window.api.quit();
 }

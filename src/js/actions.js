@@ -243,7 +243,7 @@ export function nudge(dx, dy) {
 /* ---------------- Audio ---------------- */
 export async function addAudioChannel() {
   const inputs = await audio.listInputs();
-  const sel = select([{ value: '__desktop', label: 'Desktop Audio (system sound)' }, ...inputs.map((d) => ({ value: d.id, label: d.label }))], '__desktop');
+  const sel = select([{ value: '__desktop', label: 'System audio — everything you hear (loopback)' }, ...inputs.map((d) => ({ value: d.id, label: d.label }))], '__desktop');
   const name = h('input', { type: 'text', class: 'text-input', value: 'Desktop Audio 2' });
   sel.addEventListener('change', () => {
     name.value = sel.value === '__desktop' ? 'Desktop Audio 2' : (sel.options[sel.selectedIndex].text.replace(/\s*\(.*\)\s*$/, '').slice(0, 32) || 'Mic/Aux 2');
@@ -262,19 +262,22 @@ export async function addAudioChannel() {
 }
 
 export async function editAudioChannel(ch) {
-  const inputs = ch.kind === 'input' ? await audio.listInputs() : [];
+  const opts = await audio.sourceOptions();
+  const cur = audio.sourceValue(ch);
+  if (!opts.some((o) => o.value === cur)) opts.push({ value: cur, label: `${cur} (unavailable)` });
   const name = h('input', { type: 'text', class: 'text-input', value: ch.name });
-  const sel = ch.kind === 'input'
-    ? select([{ value: 'default', label: 'Default device' }, ...inputs.map((d) => ({ value: d.id, label: d.label }))], ch.deviceId)
-    : null;
+  const sel = select(opts, cur);
   const ns = h('input', { type: 'checkbox' });
   ns.checked = !!ch.noiseSuppression;
-  const body = h('div', { class: 'source-dialog' }, field('Name', name));
-  if (sel) {
-    body.append(field('Device', sel), h('label', { class: 'check' }, ns, h('span', {}, 'Noise suppression')));
-  } else {
-    body.append(h('p', { class: 'field-hint' }, 'Captures everything you hear through your speakers or headphones (Windows loopback).'));
-  }
+  const nsRow = h('label', { class: 'check' }, ns, h('span', {}, 'Noise suppression (microphones)'));
+  const sync = () => { nsRow.style.display = sel.value === audio.SYSTEM_AUDIO ? 'none' : ''; };
+  sel.addEventListener('change', sync);
+  sync();
+  const body = h('div', { class: 'source-dialog' },
+    field('Name', name),
+    field('Source', sel),
+    nsRow,
+    h('p', { class: 'field-hint' }, '“System audio” captures everything you hear through the Windows default output device. For a different output or a single app, route it through a virtual audio cable and pick the cable here.'));
   const r = await modal({
     title: `Properties for '${ch.name}'`,
     width: 440,
@@ -283,7 +286,8 @@ export async function editAudioChannel(ch) {
   });
   if (r !== 'ok') return;
   ch.name = name.value.trim() || ch.name;
-  if (sel) { ch.deviceId = sel.value; ch.noiseSuppression = ns.checked; }
+  audio.setSource(ch, sel.value);
+  ch.noiseSuppression = ns.checked;
   audio.startChannel(ch);
   changed('audio');
 }

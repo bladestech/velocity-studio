@@ -1,8 +1,9 @@
 'use strict';
 const {
   app, BrowserWindow, ipcMain, desktopCapturer, session, dialog,
-  globalShortcut, shell, screen, Menu,
+  globalShortcut, shell, screen, Menu, safeStorage,
 } = require('electron');
+const net = require('net');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -85,6 +86,7 @@ app.on('window-all-closed', () => app.quit());
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   for (const r of recs.values()) { try { r.stream.end(); } catch { /* ignore */ } }
+  for (const s of streams.values()) { try { s.closed = true; if (s.proc) s.proc.kill(); } catch { /* ignore */ } }
 });
 
 /* ------------------------------------------------------------------ */
@@ -370,7 +372,8 @@ ipcMain.on('enc:frame', (_e, id, idx, data) => {
   if (buf.length !== s.frameSize) return;
   if (idx < s.nextIdx) { s.dropped++; return; }
   const stdin = s.proc.stdin;
-  if (stdin.writableLength > s.frameSize * 8) { s.dropped++; return; } // encoder can't keep up: skip, dup later
+  // Recording prefers buffering (~96 MB) over dropping; a stalled encoder still can't grow memory without bound.
+  if (stdin.writableLength > Math.max(8, Math.floor(96e6 / s.frameSize)) * s.frameSize) { s.dropped++; return; }
   for (; s.nextIdx < idx; s.nextIdx++) stdin.write(s.last || buf); // fill gaps so timing stays constant-rate
   stdin.write(buf);
   s.last = buf;
@@ -450,6 +453,198 @@ ipcMain.handle('enc:stop', async (_e, id, o = {}) => {
   const salvage = uniquePath(`${s.base}.mkv`);
   try { fs.renameSync(s.vPath, salvage); } catch { /* ignore */ }
   return { ok: true, path: salvage, bytes: fs.existsSync(salvage) ? fs.statSync(salvage).size : 0, dropped: s.dropped, warning: `Could not mux audio (${r.error}). Saved the video track only.` };
+});
+
+/* ------------------------------------------------------------------ */
+/* Live streaming (RTMP / RTMPS via ffmpeg)                            */
+/*                                                                     */
+/* Frames (NV12) arrive over IPC and are piped into ffmpeg's stdin;    */
+/* mixed audio arrives as 48 kHz stereo float PCM and is fed to ffmpeg */
+/* over a loopback TCP socket (Windows has no extra stdio pipes).      */
+/* Both inputs are timestamped on arrival so A/V stay in sync.         */
+/* ------------------------------------------------------------------ */
+const streams = new Map();
+let streamSeq = 0;
+
+const scrub = (s, key) => {
+  let t = String(s || '');
+  if (key) t = t.split(key).join('••••');
+  return t.replace(/(rtmps?:\/\/[^\s/]+\/[^\s/]+\/)\S+/gi, '$1••••').trim();
+};
+
+function streamStatus(s, phase, extra = {}) {
+  s.phase = phase;
+  if (win) win.webContents.send('stream:status', { id: s.id, phase, ...extra });
+}
+
+function streamArgs(s) {
+  const o = s.o;
+  const br = Math.max(500, Math.round(o.bitrate));
+  const gop = String(Math.max(1, Math.round(o.outFps * 2))); // 2 s keyframe interval (Twitch/YouTube/Kick requirement)
+  const a = [
+    '-hide_banner', '-loglevel', 'warning', '-nostdin', '-y',
+    '-use_wallclock_as_timestamps', '1', '-thread_queue_size', '64',
+    '-f', 'rawvideo', '-pix_fmt', 'nv12', '-video_size', `${o.w}x${o.h}`, '-framerate', String(o.fps), '-i', 'pipe:0',
+    '-use_wallclock_as_timestamps', '1', '-thread_queue_size', '512',
+    '-f', 'f32le', '-ar', '48000', '-ac', '2', '-i', `tcp://127.0.0.1:${s.port}`,
+    '-map', '0:v:0', '-map', '1:a:0',
+  ];
+  const filters = [];
+  if (o.outW !== o.w || o.outH !== o.h) filters.push(`scale=${o.outW}:${o.outH}:flags=bilinear`);
+  if (filters.length) a.push('-vf', filters.join(','));
+  a.push('-fps_mode', 'cfr', '-r', String(o.outFps));
+  if (o.encoder === 'nvenc') {
+    a.push('-c:v', 'h264_nvenc', '-preset', 'p5', '-tune', 'hq', '-rc', 'cbr', '-b:v', `${br}k`, '-maxrate', `${br}k`, '-bufsize', `${br * 2}k`,
+      '-g', gop, '-bf', '2', '-profile:v', 'high', '-spatial-aq', '1', '-forced-idr', '1');
+  } else {
+    a.push('-c:v', 'libx264', '-preset', 'veryfast', '-b:v', `${br}k`, '-maxrate', `${br}k`, '-bufsize', `${br * 2}k`,
+      '-g', gop, '-keyint_min', gop, '-sc_threshold', '0', '-profile:v', 'high', '-pix_fmt', 'yuv420p');
+  }
+  a.push('-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv');
+  a.push('-af', 'aresample=async=1000', '-c:a', 'aac', '-b:a', `${Math.round(o.audioBitrate)}k`, '-ar', '48000', '-ac', '2');
+  a.push('-f', 'flv', '-flvflags', 'no_duration_filesize', '-progress', 'pipe:1', '-stats_period', '1', s.url);
+  return a;
+}
+
+function spawnStream(s) {
+  const ff = ffmpegPath();
+  s.prog = {};
+  s.err = '';
+  s.backlogDrops = 0;
+  const proc = spawn(ff, streamArgs(s), { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  s.proc = proc;
+  streamStatus(s, s.attempts > 0 ? 'reconnecting' : 'connecting', { attempt: s.attempts });
+  proc.stdin.on('error', () => { /* ffmpeg exited; close handler deals with it */ });
+  proc.stderr.on('data', (d) => { s.err += d.toString(); if (s.err.length > 4000) s.err = s.err.slice(-2000); });
+  let buf = '';
+  proc.stdout.on('data', (d) => {
+    buf += d.toString();
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i).trim();
+      buf = buf.slice(i + 1);
+      const eq = line.indexOf('=');
+      if (eq < 0) continue;
+      s.prog[line.slice(0, eq)] = line.slice(eq + 1);
+      if (line.startsWith('progress=')) {
+        const p = s.prog;
+        if (Number(p.frame) > 0) {
+          if (s.phase !== 'live') { s.everLive = true; s.attempts = 0; }
+          streamStatus(s, 'live', {
+            kbps: parseFloat(p.bitrate) || 0,
+            fps: parseFloat(p.fps) || 0,
+            speed: p.speed || '',
+            dropped: (Number(p.drop_frames) || 0) + s.backlogDrops + s.totalBacklogDrops,
+          });
+        }
+      }
+    }
+  });
+  const onEnd = (code) => {
+    if (s.proc !== proc) return;
+    s.proc = null;
+    if (s.closed) return;
+    const msg = scrub(s.err.trim().split('\n').filter(Boolean).slice(-2).join(' — ') || `ffmpeg exited with code ${code}`, s.key);
+    s.totalBacklogDrops += s.backlogDrops;
+    const giveUp = !s.o.reconnect || s.attempts >= 10 || (!s.everLive && s.attempts >= 1);
+    if (giveUp) {
+      streamStatus(s, 'error', { error: msg });
+      teardownStream(s);
+    } else {
+      s.attempts += 1;
+      streamStatus(s, 'reconnecting', { attempt: s.attempts, error: msg });
+      s.timer = setTimeout(() => { if (!s.closed) spawnStream(s); }, 3000);
+    }
+  };
+  proc.on('error', (err) => { s.err += err.message; onEnd(-1); });
+  proc.on('close', onEnd);
+}
+
+function teardownStream(s) {
+  s.closed = true;
+  clearTimeout(s.timer);
+  try { if (s.sock) s.sock.destroy(); } catch { /* ignore */ }
+  try { s.server.close(); } catch { /* ignore */ }
+  streams.delete(s.id);
+}
+
+ipcMain.handle('stream:start', async (_e, o) => {
+  if (streams.size) return { ok: false, error: 'Already streaming.' };
+  const ff = ffmpegPath();
+  if (!ff) return { ok: false, error: 'ffmpeg is not available.' };
+  const server = String(o.server || '').trim().replace(/\/+$/, '');
+  if (!/^rtmps?:\/\/[^\s]+$/i.test(server)) return { ok: false, error: 'The server URL must start with rtmp:// or rtmps://' };
+  if (!o.key || /\s/.test(o.key)) return { ok: false, error: 'Enter your stream key in Settings → Stream.' };
+  const s = {
+    id: ++streamSeq, o, key: o.key, url: `${server}/${o.key}`, phase: 'connecting',
+    frameSize: (o.w * o.h * 3) / 2, attempts: 0, everLive: false, closed: false,
+    proc: null, sock: null, timer: null, prog: {}, err: '', backlogDrops: 0, totalBacklogDrops: 0,
+  };
+  s.server = net.createServer((sock) => {
+    if (s.sock) s.sock.destroy();
+    s.sock = sock;
+    sock.setNoDelay(true);
+    sock.on('error', () => {});
+    sock.on('close', () => { if (s.sock === sock) s.sock = null; });
+  });
+  await new Promise((resolve) => s.server.listen(0, '127.0.0.1', resolve));
+  s.port = s.server.address().port;
+  streams.set(s.id, s);
+  spawnStream(s);
+  return { ok: true, id: s.id };
+});
+
+ipcMain.on('stream:frame', (_e, id, data) => {
+  const s = streams.get(id);
+  if (!s || s.closed || !s.proc || !s.proc.stdin.writable) return;
+  const buf = toBuf(data);
+  if (buf.length !== s.frameSize) return;
+  if (s.proc.stdin.writableLength > s.frameSize * 4) { s.backlogDrops++; return; } // encoder/network too slow: drop, never stall the app
+  s.proc.stdin.write(buf);
+});
+
+ipcMain.on('stream:audio', (_e, id, data) => {
+  const s = streams.get(id);
+  if (!s || s.closed || !s.sock || !s.sock.writable || s.sock.writableLength > 1 << 20) return;
+  s.sock.write(toBuf(data));
+});
+
+ipcMain.handle('stream:stop', async (_e, id) => {
+  const s = streams.get(id);
+  if (!s) return { ok: true };
+  s.closed = true;
+  clearTimeout(s.timer);
+  const proc = s.proc;
+  if (proc) {
+    try { proc.stdin.end(); } catch { /* ignore */ }
+    try { if (s.sock) s.sock.end(); } catch { /* ignore */ }
+    await Promise.race([new Promise((r) => proc.once('close', r)), new Promise((r) => setTimeout(r, 3000))]);
+    try { proc.kill(); } catch { /* already gone */ }
+  }
+  teardownStream(s);
+  return { ok: true };
+});
+
+/* ---- stream keys: encrypted at rest with Windows DPAPI via Electron safeStorage ---- */
+const secretsFile = () => path.join(app.getPath('userData'), 'secrets.json');
+const readSecrets = () => { try { return JSON.parse(fs.readFileSync(secretsFile(), 'utf8')); } catch { return {}; } };
+const validSecretName = (n) => /^streamkey:[a-z0-9_-]{1,32}$/.test(String(n));
+
+ipcMain.handle('secret:available', () => safeStorage.isEncryptionAvailable());
+ipcMain.handle('secret:set', (_e, name, value) => {
+  if (!validSecretName(name) || !safeStorage.isEncryptionAvailable()) return false;
+  const all = readSecrets();
+  if (!value) delete all[name];
+  else all[name] = safeStorage.encryptString(String(value)).toString('base64');
+  fs.mkdirSync(path.dirname(secretsFile()), { recursive: true });
+  fs.writeFileSync(secretsFile(), JSON.stringify(all));
+  return true;
+});
+ipcMain.handle('secret:get', (_e, name) => {
+  if (!validSecretName(name) || !safeStorage.isEncryptionAvailable()) return '';
+  const v = readSecrets()[name];
+  if (!v) return '';
+  try { return safeStorage.decryptString(Buffer.from(v, 'base64')); } catch { return ''; }
 });
 
 /* ------------------------------------------------------------------ */

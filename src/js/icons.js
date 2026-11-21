@@ -28,7 +28,8 @@ const P = {
   refresh: '<path d="M20 11a8 8 0 10-2.3 5.7M20 4v7h-7"/>',
   exit: '<path d="M10 4H5v16h5M15 8l4 4-4 4M19 12H9"/>',
   copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2h2"/>',
-  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
+  stream: '<circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 000 7M15.5 8.5a5 5 0 010 7M5.6 5.6a9 9 0 000 12.8M18.4 5.6a9 9 0 010 12.8"/>',
+  edit:'<path d="M4 20h4L19 9l-4-4L4 16z"/>',
 };
 
 export function icon(name, size = 16) {

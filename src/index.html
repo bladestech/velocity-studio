@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:; connect-src 'self' blob:">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; style-src 'self' 'unsafe-inline'; script-src 'self' blob:; worker-src 'self' blob:; connect-src 'self' blob:">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RecScreen</title>
   <link rel="stylesheet" href="styles.css">
@@ -22,7 +22,10 @@
         <div id="guide-h" class="guide h"></div>
         <div id="sel"></div>
       </div>
-      <div id="rec-badge" class="rec-badge"><span class="rec-dot idle" id="rec-dot"></span><span id="rec-label">Ready</span><span id="rec-time">00:00:00</span><span id="rec-size"></span></div>
+      <div id="badges">
+        <div id="rec-badge" class="rec-badge"><span class="rec-dot idle" id="rec-dot"></span><span id="rec-label">Ready</span><span id="rec-time">00:00:00</span><span id="rec-size"></span></div>
+        <div id="live-badge" class="rec-badge live" hidden><span class="rec-dot live" id="live-dot"></span><span id="live-label">LIVE</span><span id="live-time">00:00:00</span><span id="live-info"></span></div>
+      </div>
     </section>
 
     <section id="docks">
@@ -63,12 +66,17 @@
       <div class="dock" id="dock-controls">
         <div class="dock-head">Controls</div>
         <div class="dock-body controls">
+          <button class="btn big stream" id="btn-stream"></button>
           <button class="btn big rec" id="btn-record"></button>
           <button class="btn" id="btn-pause" disabled></button>
-          <button class="btn" id="btn-shot"><span data-icon="shot"></span><span>Take Screenshot</span></button>
-          <button class="btn" id="btn-folder"><span data-icon="folder"></span><span>Open Recordings</span></button>
-          <button class="btn" id="btn-settings"><span data-icon="gear"></span><span>Settings</span></button>
-          <button class="btn" id="btn-exit"><span data-icon="exit"></span><span>Exit</span></button>
+          <div class="btn-row">
+            <button class="btn" id="btn-shot" title="Take screenshot"><span data-icon="shot"></span><span>Screenshot</span></button>
+            <button class="btn" id="btn-folder" title="Open recordings folder"><span data-icon="folder"></span><span>Recordings</span></button>
+          </div>
+          <div class="btn-row">
+            <button class="btn" id="btn-settings"><span data-icon="gear"></span><span>Settings</span></button>
+            <button class="btn" id="btn-exit"><span data-icon="exit"></span><span>Exit</span></button>
+          </div>
         </div>
       </div>
     </section>

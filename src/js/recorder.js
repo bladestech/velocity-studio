@@ -5,7 +5,7 @@ import { state, emit } from './store.js';
 import { formatName } from './util.js';
 import * as compositor from './compositor.js';
 import * as audio from './audio.js';
-import { Nv12Converter } from './nv12.js';
+import * as frames from './frames.js';
 
 export const ENCODERS = [
   { key: 'nvenc-h264', label: 'NVIDIA NVENC H.264 (GPU)', short: 'NVENC H.264', backend: 'ffmpeg', ffCodec: 'h264_nvenc', codec: 'h264' },
@@ -29,6 +29,7 @@ export async function probeHardware() {
   } catch { /* leave all false */ }
   emit('settings');
 }
+export const hasNvencH264 = () => hw['nvenc-h264'];
 export const hasNvenc = () => hw['nvenc-h264'] || hw['nvenc-hevc'] || hw['nvenc-av1'];
 
 export const supportedEncoders = () => ENCODERS.filter((e) => (e.backend === 'ffmpeg' ? hw[e.key] : MediaRecorder.isTypeSupported(e.mime)));
@@ -145,31 +146,26 @@ async function startNative(enc) {
   return { ok: true, path: open.path };
 }
 
-let grabbing = null;
-let conv = null;
-let frameBuf = null;
 let lastIdx = -1;
 let sizePoll = null;
+let sink = null;
 
 async function startFfmpeg(enc) {
   const s = state.settings;
   const { w, h } = compositor.getSize();
-  let converter;
-  try { converter = new Nv12Converter(w, h); } catch (err) { return { ok: false, error: `GPU converter: ${err.message}` }; }
+  try { frames.prepare(); } catch (err) { return { ok: false, error: `GPU converter: ${err.message}` }; }
   const target = resolveTarget(enc, s.container);
   const r = await window.api.encStart({
     dir: s.recPath, name: formatName(s.filename), target,
     ffCodec: enc.ffCodec, codec: enc.codec, w, h, fps: s.fps, bitrate: s.videoBitrate, nvenc: s.nvenc,
   });
-  if (!r.ok) { converter.dispose(); return r; }
+  if (!r.ok) return r;
 
   resetRec(enc);
   rec.ff = true;
   rec.id = r.id;
   rec.path = r.path;
   rec.target = target;
-  conv = converter;
-  frameBuf = new Uint8Array(conv.size);
   lastIdx = -1;
 
   // Audio goes to its own Opus file (cheap), muxed with the NVENC video when recording stops.
@@ -191,7 +187,18 @@ async function startFfmpeg(enc) {
   compositor.setRecordingFlag(true);
   rec.startedAt = performance.now();
   if (rec.amr) rec.amr.start(500);
-  compositor.setFrameHook(onFrame);
+  sink = {
+    // Frame slots are derived from active recording time, so pauses leave no gap and stalls are back-filled by the encoder process.
+    due: () => {
+      if (rec.phase !== 'recording' || !rec.ff) return null;
+      const idx = Math.floor((elapsed() * state.settings.fps) / 1000);
+      if (idx <= lastIdx) return null;
+      lastIdx = idx;
+      return idx;
+    },
+    send: (buf, idx) => { if (rec.ff && isActive()) window.api.encFrame(rec.id, idx, buf); },
+  };
+  frames.addSink(sink);
   sizePoll = setInterval(async () => {
     const st = await window.api.encSize(rec.id);
     if (st) { rec.bytes = st.bytes; rec.dropped = st.dropped; }
@@ -199,19 +206,6 @@ async function startFfmpeg(enc) {
   setPhase('recording');
   if (s.minimizeOnRecord) window.api.minimize();
   return { ok: true, path: r.path };
-}
-
-/** Per composited frame: GPU-convert to NV12 and hand it to the encoder process. */
-function onFrame() {
-  if (rec.phase !== 'recording' || !rec.ff || grabbing) return;
-  const idx = Math.floor((elapsed() * state.settings.fps) / 1000);
-  if (idx <= lastIdx) return;
-  lastIdx = idx;
-  const id = rec.id;
-  grabbing = conv.convert(compositor.canvas, frameBuf)
-    .then((buf) => { if (rec.id === id && rec.ff && isActive()) window.api.encFrame(id, idx, buf); })
-    .catch((err) => { rec.error = err.message; })
-    .finally(() => { grabbing = null; });
 }
 
 /* ------------------------------ pause / stop ------------------------------ */
@@ -236,14 +230,13 @@ export async function stop() {
   compositor.setRecordingFlag(false);
   let result;
   if (rec.ff) {
-    compositor.setFrameHook(null);
     clearInterval(sizePoll);
-    if (grabbing) await grabbing;
+    if (sink) { frames.removeSink(sink); sink = null; }
+    await frames.whenIdle();
     if (rec.amr && rec.amr.state !== 'inactive') {
       await new Promise((resolve) => { rec.amr.onstop = resolve; try { rec.amr.stop(); } catch { resolve(); } });
     }
     await rec.chain;
-    if (conv) { conv.dispose(); conv = null; }
     const audioOffsetMs = rec.amr && rec.audioStartAt ? rec.audioStartAt - rec.startedAt : 0;
     result = await window.api.encStop(rec.id, {
       target: rec.target, codec: encoder.codec, audioBitrate: state.settings.audioBitrate, audioOffsetMs, durationMs,
