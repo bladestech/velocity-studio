@@ -32,6 +32,9 @@ Builds a Windows NSIS installer (`dist\RecScreen Setup <version>.exe`) from the 
 
 The installer is a one-click, per-user install (no admin rights needed) and is **unsigned**, so Windows SmartScreen may warn about an unknown publisher. `dist/` is gitignored and previous installers are not cleaned up, so delete old ones by hand if you don't want them.
 
+## License
+[MIT](LICENSE). RecScreen bundles Electron (MIT) and an ffmpeg build via `ffmpeg-static`; ffmpeg is licensed separately (GPL for the bundled build) - see the ffmpeg project's licensing terms if you redistribute the installer.
+
 ## Notes
 - `npm run selftest` records a 5 s clip and exits (used to verify the capture pipeline).
 - After a fresh `npm install`, npm may skip install scripts; if `node_modules\electron\dist` is missing run `node node_modules\electron\install.js`.

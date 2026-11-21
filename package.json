@@ -4,6 +4,7 @@
   "description": "RecScreen - an OBS-style screen recorder",
   "main": "main.js",
   "author": "Cole",
+  "license": "MIT",
   "private": true,
   "scripts": {
     "start": "electron .",
