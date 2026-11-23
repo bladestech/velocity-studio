@@ -47,8 +47,8 @@ button { cursor: pointer; }
   -webkit-app-region: drag;
 }
 #titlebar .brand { display: flex; align-items: center; gap: 8px; margin-right: 8px; font-weight: 600; letter-spacing: .2px; }
-.brand-icon { width: 20px; height: 20px; border-radius: 5px; display: block; }
-.about-logo img { width: 72px; height: 72px; border-radius: 16px; }
+.brand-icon { width: 20px; height: 20px; display: block; }
+.about-logo img { width: 72px; height: 72px; }
 #menubar { display: flex; gap: 2px; -webkit-app-region: no-drag; }
 .menu-btn { background: none; border: 0; padding: 5px 10px; border-radius: 5px; color: var(--text); }
 .menu-btn:hover, .menu-btn.open { background: var(--panel-3); }
