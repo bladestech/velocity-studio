@@ -20,5 +20,10 @@
       RMDir /r "$APPDATA\${APP_PRODUCT_FILENAME}\ffmpeg"
     !endif
     RMDir /r "$APPDATA\${APP_FILENAME}\ffmpeg"
+    ; Electron's userData folder is named after package.json "name" (velocity-studio), which is where the app
+    ; actually puts the download (<userData>/ffmpeg/<version>), so that is the folder that has to be cleaned.
+    !ifdef APP_PACKAGE_NAME
+      RMDir /r "$APPDATA\${APP_PACKAGE_NAME}\ffmpeg"
+    !endif
   ${endIf}
 !macroend
