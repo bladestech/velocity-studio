@@ -16,6 +16,7 @@
   <img alt="Electron 45" src="https://img.shields.io/badge/Electron-45-47848f?style=flat-square&logo=electron&logoColor=white">
   <img alt="NVIDIA NVENC" src="https://img.shields.io/badge/NVIDIA-NVENC-76b900?style=flat-square&logo=nvidia&logoColor=white">
   <img alt="AMD AMF" src="https://img.shields.io/badge/AMD-AMF-ed1c24?style=flat-square&logo=amd&logoColor=white">
+  <img alt="Intel Quick Sync" src="https://img.shields.io/badge/Intel-Quick%20Sync-0071c5?style=flat-square&logo=intel&logoColor=white">
   <img alt="Streaming: RTMP and RTMPS" src="https://img.shields.io/badge/streaming-RTMP%20%2F%20RTMPS-9146ff?style=flat-square">
 </p>
 
