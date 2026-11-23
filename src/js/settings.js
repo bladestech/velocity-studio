@@ -3,13 +3,12 @@ import { state, emit, save, DEFAULT_SETTINGS } from './store.js';
 import { h, deepClone, formatName, eventToAccelerator, prettyAccel } from './util.js';
 import { modal, field, select, checkbox, numberInput, toast } from './widgets.js';
 import * as recorder from './recorder.js';
-import { hasNvenc } from './recorder.js';
+
 import * as compositor from './compositor.js';
 import { resetAll, sync } from './resources.js';
 import { icon } from './icons.js';
 import * as audio from './audio.js';
 import * as stream from './stream.js';
-import { hasNvencH264 } from './recorder.js';
 
 let appInfo = null;
 export const setAppInfo = (i) => { appInfo = i; };
@@ -35,7 +34,7 @@ export function openSettings() {
   const updPrev = () => { preview.textContent = `Example: ${formatName(fname.value || '%CCYY-%MM-%DD %hh-%mm-%ss')}.${d.container}`; };
   fname.addEventListener('input', () => { d.filename = fname.value; updPrev(); });
   const contSel = select([{ value: 'mp4', label: 'MP4 (.mp4) — plays everywhere' }, { value: 'mkv', label: 'MKV (.mkv) — crash-safe' }, { value: 'webm', label: 'WebM (.webm)' }], d.container, (v) => { d.container = v; updPrev(); });
-  const encSel = select([{ value: 'auto', label: hasNvenc() ? 'Automatic (NVENC when available)' : 'Automatic (recommended)' }, ...encs.map((e) => ({ value: e.key, label: e.label }))], d.encoder, (v) => { d.encoder = v; });
+  const encSel = select([{ value: 'auto', label: recorder.hasNvenc() ? 'Automatic (NVENC when available)' : 'Automatic (recommended)' }, ...encs.map((e) => ({ value: e.key, label: e.label }))], d.encoder, (v) => { d.encoder = v; });
   const brIn = numberInput(d.videoBitrate, { min: 1000, max: 200000, step: 500, onChange: (v) => { d.videoBitrate = v || 1000; } });
   const nv = d.nvenc;
   const cqIn = numberInput(nv.cq, { min: 1, max: 51, onChange: (v) => { nv.cq = v || 21; } });
@@ -46,7 +45,7 @@ export function openSettings() {
   ], nv.rc, (v) => { nv.rc = v; cqIn.disabled = v !== 'cq'; brIn.disabled = v === 'cq'; });
   cqIn.disabled = nv.rc !== 'cq';
   brIn.disabled = nv.rc === 'cq';
-  const nvencBox = hasNvenc() ? h('div', { class: 'nvenc-box' },
+  const nvencBox = recorder.hasNvenc() ? h('div', { class: 'nvenc-box' },
     h('div', { class: 'box-title' }, 'NVIDIA NVENC'),
     h('div', { class: 'grid2' }, field('Preset', presetSel), field('Rate control', rcSel)),
     field('Constant-quality level (1–51, lower = better quality, bigger files)', cqIn),
@@ -179,8 +178,8 @@ export function openSettings() {
   const sHeight = select([{ value: 0, label: 'Same as canvas' }, { value: 1080, label: '1920 × 1080' }, { value: 900, label: '1600 × 900' }, { value: 720, label: '1280 × 720' }, { value: 540, label: '960 × 540' }], sc.height, (v) => { sc.height = Number(v); });
   const sFps = select([{ value: 0, label: 'Same as canvas' }, { value: 60, label: '60 fps' }, { value: 48, label: '48 fps' }, { value: 30, label: '30 fps' }, { value: 24, label: '24 fps' }], sc.fps, (v) => { sc.fps = Number(v); });
   const sEnc = select([
-    { value: 'auto', label: hasNvencH264() ? 'Automatic (NVIDIA NVENC)' : 'Automatic (x264, CPU)' },
-    ...(hasNvencH264() ? [{ value: 'nvenc', label: 'NVIDIA NVENC H.264 (GPU)' }] : []),
+    { value: 'auto', label: recorder.hasNvencH264() ? 'Automatic (NVIDIA NVENC)' : 'Automatic (x264, CPU)' },
+    ...(recorder.hasNvencH264() ? [{ value: 'nvenc', label: 'NVIDIA NVENC H.264 (GPU)' }] : []),
     { value: 'x264', label: 'x264 (CPU, veryfast)' },
   ], sc.encoder, (v) => { sc.encoder = v; });
   if (streaming) [sBitrate, sAudio, sHeight, sFps, sEnc].forEach((el) => { el.disabled = true; });

@@ -42,7 +42,6 @@ export function fmtBytes(b) {
 }
 
 export const dbToGain = (db) => (db <= -60 ? 0 : 10 ** (db / 20));
-export const gainToDb = (g) => (g <= 0.000001 ? -Infinity : 20 * Math.log10(g));
 
 export function debounce(fn, ms) {
   let t;

@@ -5,6 +5,8 @@
   "main": "main.js",
   "author": "Cole",
   "license": "MIT",
+  "homepage": "https://github.com/colebolebole/velocity-studio",
+  "repository": { "type": "git", "url": "https://github.com/colebolebole/velocity-studio.git" },
   "private": true,
   "scripts": {
     "start": "electron .",

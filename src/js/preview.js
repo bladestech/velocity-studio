@@ -1,5 +1,5 @@
 // Interactive preview: click to select, drag to move, handles to resize (Alt = crop, Shift = free aspect).
-import { state, emit, save, activeScene, selectedItem, BASE_W, BASE_H } from './store.js';
+import { emit, save, activeScene, selectedItem, BASE_W, BASE_H } from './store.js';
 import { $, clamp } from './util.js';
 import { getRes } from './resources.js';
 import { selectItem, editSource, nudge, removeItem } from './actions.js';

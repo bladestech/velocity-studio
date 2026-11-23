@@ -1,11 +1,10 @@
 // State-changing operations on scenes, sources and audio channels.
 import { state, emit, save, activeScene, selectedItem, newItem, newScene, newAudioChannel, BASE_W, BASE_H } from './store.js';
-import { uid, deepClone, clamp } from './util.js';
+import { uid, deepClone, clamp, h } from './util.js';
 import { acquire, invalidate, sync, getRes } from './resources.js';
 import * as audio from './audio.js';
 import { sourceDialog, uniqueName, kindInfo } from './source-dialog.js';
 import { toast, promptBox, confirmBox, modal, field, select } from './widgets.js';
-import { h } from './util.js';
 
 const changed = (...names) => { names.forEach((n) => emit(n)); save(); };
 
@@ -270,9 +269,9 @@ export async function editAudioChannel(ch) {
   const ns = h('input', { type: 'checkbox' });
   ns.checked = !!ch.noiseSuppression;
   const nsRow = h('label', { class: 'check' }, ns, h('span', {}, 'Noise suppression (microphones)'));
-  const sync = () => { nsRow.style.display = sel.value === audio.SYSTEM_AUDIO ? 'none' : ''; };
-  sel.addEventListener('change', sync);
-  sync();
+  const toggleNoiseRow = () => { nsRow.style.display = sel.value === audio.SYSTEM_AUDIO ? 'none' : ''; };
+  sel.addEventListener('change', toggleNoiseRow);
+  toggleNoiseRow();
   const body = h('div', { class: 'source-dialog' },
     field('Name', name),
     field('Source', sel),
