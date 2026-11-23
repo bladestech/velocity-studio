@@ -56,10 +56,12 @@ export const kindOf = (enc) => (!enc ? null : enc.backend === 'ffmpeg' ? FAMILIE
 /** Which ffmpeg encoders actually initialise on this machine (filled by probeHardware). */
 const avail = {};
 let probed = false;
+let onLegacy = []; // ffmpeg codecs main.js runs on the 6.1.1 compatibility build
 export async function probeHardware() {
   try {
     const r = await window.api.probeEncoders();
     for (const e of ENCODERS) if (e.backend === 'ffmpeg') avail[e.key] = !!(r.enc && r.enc[e.ffCodec]);
+    onLegacy = r.legacy || [];
   } catch { /* leave all unavailable */ }
   probed = true;
   emit('settings');
@@ -71,6 +73,15 @@ export const hasNvenc = () => anyOf('nvenc');
 export const hasAmfH264 = () => anyOf('amf', 'h264');
 export const hasAmf = () => anyOf('amf');
 export const hasQsvH264 = () => anyOf('qsv', 'h264');
+/** True when at least one encoder only works thanks to the 6.1.1 compatibility build. */
+export const usesLegacy = () => onLegacy.length > 0;
+
+/** Hardware encoder family each GPU vendor provides (PCI vendor ids). */
+export const VENDOR_FAMILY = { 0x10de: 'nvenc', 0x1002: 'amf', 0x8086: 'qsv' };
+/** GPUs on this PC (from window.api.gpuInfo()) whose vendor's hardware encoder isn't available. */
+export const gpusMissingEncoder = (gpu) => (!gpu ? [] : gpu.devices || [gpu])
+  .filter((d) => VENDOR_FAMILY[d.vendorId] && !anyOf(VENDOR_FAMILY[d.vendorId]));
+
 export const hasHardware = () => hasNvenc() || hasAmf() || anyOf('qsv');
 /** Tuning ({ preset, rc, cq }) that applies to an encoder, or null for Chromium encoders. */
 export const tuningFor = (enc, s = state.settings) => (!enc || enc.backend !== 'ffmpeg' ? null : s.tuning[enc.family]);

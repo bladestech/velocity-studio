@@ -7,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const ffmpeg = require('ffmpeg-static');
+const ffmpeg = require('./ffmpeg-path');
 const src = path.join(root, 'src', 'icon.png');
 const out = path.join(root, 'build', 'icon.ico');
 const SIZES = [16, 24, 32, 48, 64, 128, 256];

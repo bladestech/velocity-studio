@@ -13,6 +13,7 @@ import { setAppInfo, applyHotkeys } from './settings.js';
 import { toast } from './widgets.js';
 import * as splash from './splash.js';
 import { maybeRunOnStartup } from './benchmark.js';
+import { setupOnStartup } from './ffmpeg-setup.js';
 
 /** Taskbar badge (red = recording, amber = paused, cyan = live) and a matching window title. */
 function reportActivity() {
@@ -87,10 +88,14 @@ async function boot() {
   on('recording', (e) => { window.api.setBusy(e.detail.phase !== 'idle' || stream.isActive()); reportActivity(); });
 
   if (!recorder.supportedEncoders().length) toast('No supported video encoder found in this build.', { kind: 'error', timeout: 0 });
-  if (!info.ffmpeg) toast('ffmpeg is missing, so recordings stay in their native format (still playable).', { kind: 'warn', timeout: 8000 });
+  // ffmpeg is downloaded on first launch (ffmpeg-setup.js) rather than shipped in the installer.
+  const needSetup = !info.ffmpeg && !info.selftest && !state.settings.ffmpegDeclined;
 
   // First launch (or a new graphics card): offer the encoder benchmark once the intro has played.
-  splash.finish({ instant: !!info.selftest }).then(() => maybeRunOnStartup()).catch(() => {});
+  (needSetup ? setupOnStartup() : Promise.resolve())
+    .then(() => splash.finish({ instant: !!info.selftest }))
+    .then(() => maybeRunOnStartup())
+    .catch((err) => { console.error(err); splash.finish({ instant: true }); });
   if (info.selftest) runSelfTest();
 }
 

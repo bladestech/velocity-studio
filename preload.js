@@ -21,6 +21,11 @@ contextBridge.exposeInMainWorld('api', {
 
   probeEncoders: () => invoke('enc:probe'),
   gpuInfo: () => invoke('gpu:info'),
+  ffmpegStatus: () => invoke('ffmpeg:status'),
+  ffmpegInstall: (which) => invoke('ffmpeg:install', which),
+  ffmpegCancel: () => invoke('ffmpeg:cancel'),
+  ffmpegRemove: (which) => invoke('ffmpeg:remove', which),
+  onFfmpegProgress: (cb) => { const f = (_e, d) => cb(d); ipcRenderer.on('ffmpeg:progress', f); return () => ipcRenderer.removeListener('ffmpeg:progress', f); },
   benchRun: (o) => invoke('bench:run', o),
   benchCancel: () => invoke('bench:cancel'),
   onBenchProgress: (cb) => { const f = (_e, d) => cb(d); ipcRenderer.on('bench:progress', f); return () => ipcRenderer.removeListener('bench:progress', f); },

@@ -1,7 +1,7 @@
 'use strict';
 const {
   app, BrowserWindow, ipcMain, desktopCapturer, session, dialog,
-  globalShortcut, shell, screen, Menu, safeStorage,
+  globalShortcut, shell, screen, Menu, safeStorage, net: electronNet,
 } = require('electron');
 const net = require('net');
 const { overlayFor } = require('./taskbar');
@@ -9,6 +9,8 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
+const FFMPEG = require('./ffmpeg-builds');
+const { installBuild, isInstalled } = require('./ffmpeg-setup');
 
 const SELFTEST = process.argv.includes('--selftest');
 
@@ -28,13 +30,19 @@ let win = null;
 const recs = new Map(); // id -> { stream, path, bytes, start }
 let recSeq = 0;
 
-function ffmpegPath() {
-  try {
-    let p = require('ffmpeg-static');
-    if (p && p.includes('app.asar')) p = p.replace('app.asar', 'app.asar.unpacked');
-    return p && fs.existsSync(p) ? p : null;
-  } catch { return null; }
+/* ffmpeg is downloaded on first launch into <userData>/ffmpeg/<version> (see ffmpeg-builds.js). When running
+   from source, vendor/ffmpeg(-legacy) from `npm run ffmpeg` is used if the app hasn't downloaded its own copy. */
+const ffDir = (which) => path.join(app.getPath('userData'), 'ffmpeg', FFMPEG[which].version);
+function ffExe(which) {
+  if (isInstalled(FFMPEG[which], ffDir(which))) return path.join(ffDir(which), 'ffmpeg.exe');
+  if (!app.isPackaged) {
+    const dev = path.join(__dirname, 'vendor', which === 'main' ? 'ffmpeg' : 'ffmpeg-legacy', 'ffmpeg.exe');
+    if (fs.existsSync(dev)) return dev;
+  }
+  return null;
 }
+/** The main ffmpeg (muxing, screenshots, post-processing, and every encoder that works on it). */
+const ffmpegPath = () => ffExe('main');
 
 function defaultRecDir() {
   try { return path.join(app.getPath('videos'), 'Velocity Studio'); }
@@ -274,13 +282,19 @@ ipcMain.handle('rec:close', async (_e, id, opts = {}) => {
 });
 
 /* ------------------------------------------------------------------ */
-/* Hardware encoding (NVIDIA NVENC / AMD AMF via ffmpeg)               */
+/* Encoding via ffmpeg (NVENC / AMF / Quick Sync / x264 / x265)       */
 /*                                                                     */
 /* The renderer composites the scene, converts it to NV12 on the GPU    */
-/* and streams raw frames here. They are piped into ffmpeg (NVENC/AMF)*/
+/* and streams raw frames here. They are piped into ffmpeg's encoder, */
 /* the mixed audio arrives as a separate Opus file; both are muxed into */
 /* the final container when recording stops.                           */
 /* ------------------------------------------------------------------ */
+// Tag frames as BT.709 limited range (what nv12.js produces). Setting it on the frames, rather than only via
+// -color_primaries / -color_trc, is what makes every encoder write it: ffmpeg 9 no longer passes those output
+// options through to the H.264 encoders.
+const BT709 = 'setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv';
+const BT709_FLAGS = ['-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv'];
+
 const encs = new Map(); // id -> session
 let encSeq = 0;
 let probeCache = null;
@@ -303,21 +317,80 @@ const PROBE_CODECS = [
   'libx264', 'libx265',
 ];
 
-ipcMain.handle('enc:probe', async () => {
+ipcMain.handle('enc:probe', async () => probe());
+
+/**
+ * Which encoders start, and on which build. Each codec is tried on the main build first; any that fail there are
+ * retried on the legacy build (if downloaded) and, if that works, routed to it from then on (see ffFor()).
+ */
+async function probe() {
   if (probeCache) return probeCache;
-  const ff = ffmpegPath();
+  const main = ffmpegPath();
+  const legacy = ffExe('legacy');
   const enc = Object.fromEntries(PROBE_CODECS.map((c) => [c, false]));
-  if (ff) {
-    const ok = await Promise.all(PROBE_CODECS.map((c) => runFfmpegProbe(ff, c)));
+  const bin = {};
+  if (main) {
+    const ok = await Promise.all(PROBE_CODECS.map((c) => runFfmpegProbe(main, c)));
     PROBE_CODECS.forEach((c, i) => { enc[c] = ok[i]; });
+    if (legacy) {
+      const retry = PROBE_CODECS.filter((c) => !enc[c]);
+      const ok2 = await Promise.all(retry.map((c) => runFfmpegProbe(legacy, c)));
+      retry.forEach((c, i) => { if (ok2[i]) { enc[c] = true; bin[c] = 'legacy'; } });
+    }
   }
   probeCache = {
     enc,
-    // Kept for older renderer code paths.
+    legacy: Object.keys(bin), // codecs that run on the legacy build
     nvenc: { h264: enc.h264_nvenc, hevc: enc.hevc_nvenc, av1: enc.av1_nvenc },
     amf: { h264: enc.h264_amf, hevc: enc.hevc_amf, av1: enc.av1_amf },
   };
   return probeCache;
+}
+
+/** ffmpeg binary to encode with a given codec. */
+function ffFor(ffCodec) {
+  if (probeCache && probeCache.legacy.includes(ffCodec)) return ffExe('legacy') || ffmpegPath();
+  return ffmpegPath();
+}
+
+/* ---- First-launch download (ffmpeg-setup.js) ---- */
+let ffInstall = null; // { which, ctrl }
+
+ipcMain.handle('ffmpeg:status', () => ({
+  main: !!ffmpegPath(),
+  legacy: !!ffExe('legacy'),
+  builds: Object.fromEntries(Object.entries(FFMPEG).map(([k, b]) => [k, { version: b.version, label: b.label, size: b.size }])),
+}));
+
+ipcMain.handle('ffmpeg:install', async (_e, which) => {
+  if (!FFMPEG[which]) return { ok: false, error: 'Unknown build.' };
+  if (ffInstall) return { ok: false, error: 'A download is already running.' };
+  const ctrl = new AbortController();
+  ffInstall = { which, ctrl };
+  const send = (d) => { if (win) win.webContents.send('ffmpeg:progress', { which, ...d }); };
+  try {
+    await installBuild(FFMPEG[which], ffDir(which), {
+      fetchImpl: (url, opts) => electronNet.fetch(url, opts), // Chromium networking: honours system proxy settings
+      signal: ctrl.signal,
+      onPhase: (phase, info = {}) => send({ phase, ...info }),
+    });
+    probeCache = null; // re-probe with the new build
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, cancelled: !!err.cancelled, error: err.cancelled ? 'Cancelled.' : (err.message || String(err)) };
+  } finally {
+    ffInstall = null;
+  }
+});
+
+ipcMain.handle('ffmpeg:cancel', () => { if (ffInstall) ffInstall.ctrl.abort(); return true; });
+
+// Only the compatibility build can be removed (done when it turned out not to rescue any encoder).
+ipcMain.handle('ffmpeg:remove', (_e, which) => {
+  if (which !== 'legacy' || ffInstall) return false;
+  try { fs.rmSync(ffDir('legacy'), { recursive: true, force: true }); } catch { return false; }
+  probeCache = null;
+  return true;
 });
 
 const familyOf = (ffCodec) => (/_nvenc$/.test(ffCodec) ? 'nvenc' : /_amf$/.test(ffCodec) ? 'amf' : /_qsv$/.test(ffCodec) ? 'qsv' : ffCodec === 'libx265' ? 'x265' : 'x264');
@@ -403,7 +476,9 @@ ipcMain.handle('gpu:info', async () => {
     const info = await app.getGPUInfo('complete');
     const devs = (info.gpuDevice || []).filter((d) => d.deviceString && !/basic render/i.test(d.deviceString));
     const d = devs.find((x) => x.active) || devs[0];
-    if (d) return { name: d.deviceString, vendorId: d.vendorId, driver: d.driverVersion || '' };
+    // Every GPU, not just the active one: laptops often pair Intel graphics with an NVIDIA / AMD card.
+    const devices = devs.map((x) => ({ name: x.deviceString, vendorId: x.vendorId, driver: x.driverVersion || '' }));
+    if (d) return { name: d.deviceString, vendorId: d.vendorId, driver: d.driverVersion || '', devices };
     const m = /ANGLE \([^,]+, ([^(,]+)/.exec((info.auxAttributes || {}).glRenderer || '');
     return { name: m ? m[1].trim() : 'Unknown GPU', vendorId: 0, driver: '' };
   } catch { return { name: 'Unknown GPU', vendorId: 0, driver: '' }; }
@@ -469,7 +544,7 @@ ipcMain.handle('bench:run', async (_e, o) => {
           '-c:v', job.ffCodec, ...encoderArgs({ ffCodec: job.ffCodec, fps, bitrate: o.bitrate, keyint: 2, live: !!job.live, tune: { preset, rc: job.live ? 'cbr' : 'vbr' } }),
           '-f', 'null', '-'];
         // Give up on a trial once it is clearly far too slow (under ~0.3x real time).
-        const t = await runTimed(ff, args, Math.max(4000, (frames / fps) * 3500));
+        const t = await runTimed(ffFor(job.ffCodec), args, Math.max(4000, (frames / fps) * 3500));
         const speed = t.ok && t.ms > 0 ? (frames / fps) / (t.ms / 1000) : 0;
         const ok = t.ok && speed >= job.target;
         r.tried.push({ preset, speed, ok, err: t.ok ? undefined : t.err });
@@ -509,10 +584,10 @@ ipcMain.handle('enc:start', async (_e, o) => {
     '-hide_banner', '-loglevel', 'error', '-nostdin', '-y',
     '-f', 'rawvideo', '-pix_fmt', 'nv12', '-video_size', `${o.w}x${o.h}`, '-framerate', String(o.fps), '-i', 'pipe:0',
     '-c:v', o.ffCodec, ...encoderArgs(o),
-    '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv',
+    '-vf', BT709, ...BT709_FLAGS,
     '-f', 'matroska', vPath,
   ];
-  const proc = spawn(ff, args, { stdio: ['pipe', 'ignore', 'pipe'], windowsHide: true });
+  const proc = spawn(ffFor(o.ffCodec), args, { stdio: ['pipe', 'ignore', 'pipe'], windowsHide: true });
   const id = ++encSeq;
   const s = {
     id, proc, vPath, aPath, finalPath, base,
@@ -637,7 +712,7 @@ ipcMain.handle('enc:stop', async (_e, id, o = {}) => {
 /* Frames (NV12) arrive over IPC and are piped into ffmpeg's stdin;    */
 /* mixed audio arrives as 48 kHz stereo float PCM and is fed to ffmpeg */
 /* over a loopback TCP socket (Windows has no extra stdio pipes).      */
-/* Both inputs are timestamped on arrival so A/V stay in sync.         */
+/* Video is timestamped on arrival, audio by its sample count.        */
 /* ------------------------------------------------------------------ */
 const streams = new Map();
 let streamSeq = 0;
@@ -653,37 +728,48 @@ function streamStatus(s, phase, extra = {}) {
   if (win) win.webContents.send('stream:status', { id: s.id, phase, ...extra });
 }
 
-function streamArgs(s) {
+/**
+ * Input queue size for a live (stdin / socket) input. ffmpeg 9 removed -thread_queue_size as an input option
+ * (it now only applies to muxers), so it's passed only to the 6.1.1 compatibility build, where it still helps.
+ */
+const inputQueue = (ff, n) => (ff && ff === ffExe('legacy') ? ['-thread_queue_size', String(n)] : []);
+
+function streamArgs(s, ff) {
   const o = s.o;
   const br = Math.max(500, Math.round(o.bitrate));
   // Keyframes every 2 s (Twitch/YouTube/Kick requirement) are set by encoderArgs({ keyint: 2 }).
   const a = [
     '-hide_banner', '-loglevel', 'warning', '-nostdin', '-y',
-    '-use_wallclock_as_timestamps', '1', '-thread_queue_size', '64',
+    '-use_wallclock_as_timestamps', '1', ...inputQueue(ff, 64),
     '-f', 'rawvideo', '-pix_fmt', 'nv12', '-video_size', `${o.w}x${o.h}`, '-framerate', String(o.fps), '-i', 'pipe:0',
-    '-use_wallclock_as_timestamps', '1', '-thread_queue_size', '512',
+    // Audio is timed by its sample count (the renderer's audio clock delivers exactly real-time PCM); video by
+    // arrival time, since frames can be dropped. ffmpeg 9 mis-times wallclock-stamped raw audio (absolute
+    // timestamps, most samples dropped), so audio must not use -use_wallclock_as_timestamps.
+    ...inputQueue(ff, 512),
     '-f', 'f32le', '-ar', '48000', '-ac', '2', '-i', `tcp://127.0.0.1:${s.port}`,
     '-map', '0:v:0', '-map', '1:a:0',
   ];
-  const filters = [];
+  const filters = [BT709];
   if (o.outW !== o.w || o.outH !== o.h) filters.push(`scale=${o.outW}:${o.outH}:flags=bilinear`);
   if (filters.length) a.push('-vf', filters.join(','));
   a.push('-fps_mode', 'cfr', '-r', String(o.outFps));
-  const ffCodec = { nvenc: 'h264_nvenc', amf: 'h264_amf', qsv: 'h264_qsv' }[o.encoder] || 'libx264';
+  const ffCodec = streamCodec(o.encoder);
   a.push('-c:v', ffCodec, ...encoderArgs({ ffCodec, fps: o.outFps, bitrate: br, keyint: 2, live: true, tune: { preset: o.preset, rc: 'cbr' } }));
   if (ffCodec === 'libx264') a.push('-pix_fmt', 'yuv420p');
-  a.push('-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv');
+  a.push(...BT709_FLAGS);
   a.push('-af', 'aresample=async=1000', '-c:a', 'aac', '-b:a', `${Math.round(o.audioBitrate)}k`, '-ar', '48000', '-ac', '2');
   a.push('-f', 'flv', '-flvflags', 'no_duration_filesize', '-progress', 'pipe:1', '-stats_period', '1', s.url);
   return a;
 }
 
+const streamCodec = (encoder) => ({ nvenc: 'h264_nvenc', amf: 'h264_amf', qsv: 'h264_qsv' }[encoder] || 'libx264');
+
 function spawnStream(s) {
-  const ff = ffmpegPath();
+  const ff = ffFor(streamCodec(s.o.encoder));
   s.prog = {};
   s.err = '';
   s.backlogDrops = 0;
-  const proc = spawn(ff, streamArgs(s), { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  const proc = spawn(ff, streamArgs(s, ff), { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   s.proc = proc;
   streamStatus(s, s.attempts > 0 ? 'reconnecting' : 'connecting', { attempt: s.attempts });
   proc.stdin.on('error', () => { /* ffmpeg exited; close handler deals with it */ });
