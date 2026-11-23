@@ -712,7 +712,7 @@ ipcMain.handle('enc:stop', async (_e, id, o = {}) => {
 /* Frames (NV12) arrive over IPC and are piped into ffmpeg's stdin;    */
 /* mixed audio arrives as 48 kHz stereo float PCM and is fed to ffmpeg */
 /* over a loopback TCP socket (Windows has no extra stdio pipes).      */
-/* Both inputs are timestamped on arrival so A/V stay in sync.         */
+/* Video is timestamped on arrival, audio by its sample count.        */
 /* ------------------------------------------------------------------ */
 const streams = new Map();
 let streamSeq = 0;
@@ -728,15 +728,24 @@ function streamStatus(s, phase, extra = {}) {
   if (win) win.webContents.send('stream:status', { id: s.id, phase, ...extra });
 }
 
-function streamArgs(s) {
+/**
+ * Input queue size for a live (stdin / socket) input. ffmpeg 9 removed -thread_queue_size as an input option
+ * (it now only applies to muxers), so it's passed only to the 6.1.1 compatibility build, where it still helps.
+ */
+const inputQueue = (ff, n) => (ff && ff === ffExe('legacy') ? ['-thread_queue_size', String(n)] : []);
+
+function streamArgs(s, ff) {
   const o = s.o;
   const br = Math.max(500, Math.round(o.bitrate));
   // Keyframes every 2 s (Twitch/YouTube/Kick requirement) are set by encoderArgs({ keyint: 2 }).
   const a = [
     '-hide_banner', '-loglevel', 'warning', '-nostdin', '-y',
-    '-use_wallclock_as_timestamps', '1', '-thread_queue_size', '64',
+    '-use_wallclock_as_timestamps', '1', ...inputQueue(ff, 64),
     '-f', 'rawvideo', '-pix_fmt', 'nv12', '-video_size', `${o.w}x${o.h}`, '-framerate', String(o.fps), '-i', 'pipe:0',
-    '-use_wallclock_as_timestamps', '1', '-thread_queue_size', '512',
+    // Audio is timed by its sample count (the renderer's audio clock delivers exactly real-time PCM); video by
+    // arrival time, since frames can be dropped. ffmpeg 9 mis-times wallclock-stamped raw audio (absolute
+    // timestamps, most samples dropped), so audio must not use -use_wallclock_as_timestamps.
+    ...inputQueue(ff, 512),
     '-f', 'f32le', '-ar', '48000', '-ac', '2', '-i', `tcp://127.0.0.1:${s.port}`,
     '-map', '0:v:0', '-map', '1:a:0',
   ];
@@ -760,7 +769,7 @@ function spawnStream(s) {
   s.prog = {};
   s.err = '';
   s.backlogDrops = 0;
-  const proc = spawn(ff, streamArgs(s), { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  const proc = spawn(ff, streamArgs(s, ff), { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   s.proc = proc;
   streamStatus(s, s.attempts > 0 ? 'reconnecting' : 'connecting', { attempt: s.attempts });
   proc.stdin.on('error', () => { /* ffmpeg exited; close handler deals with it */ });
