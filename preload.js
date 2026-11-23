@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('api', {
   restore: () => invoke('win:restore'),
   fullscreen: (on) => invoke('win:fullscreen', on),
   quit: () => invoke('app:quit'),
+  setActivity: (a) => ipcRenderer.send('app:activity', a),
   setBusy: (b) => ipcRenderer.send('app:busy', !!b),
   onRequestClose: (cb) => ipcRenderer.on('request-close', () => cb()),
   stats: (dir) => invoke('stats', dir),

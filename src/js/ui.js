@@ -157,7 +157,7 @@ function drawMeters() {
     if (c.width !== w || c.height !== hh) { c.width = w; c.height = hh; }
     const g = c.getContext('2d');
     g.clearRect(0, 0, w, hh);
-    g.fillStyle = '#0f1013';
+    g.fillStyle = '#050c0f';
     g.fillRect(0, 0, w, hh);
     const lv = audio.levels(id);
     const st = audio.getStatus(id);
@@ -171,19 +171,19 @@ function drawMeters() {
     grad.addColorStop(1, '#e5483f');
     for (let i = 0; i < 2; i++) {
       const y = Math.floor(dpr + i * (barH + dpr));
-      g.fillStyle = '#1b1d22';
+      g.fillStyle = '#0e1b21';
       g.fillRect(0, y, w, barH);
       if (lv.ok && !m.cfg.muted) {
         g.fillStyle = grad;
         g.fillRect(0, y, Math.floor(w * dbPos(lv.peak[i])), barH);
         const hx = Math.floor(w * dbPos(lv.hold[i]));
-        if (hx > 2) { g.fillStyle = '#e8eaf0'; g.fillRect(hx - Math.ceil(dpr), y, Math.ceil(dpr * 1.5), barH); }
+        if (hx > 2) { g.fillStyle = '#e3f1f5'; g.fillRect(hx - Math.ceil(dpr), y, Math.ceil(dpr * 1.5), barH); }
       }
     }
     g.fillStyle = 'rgba(255,255,255,0.12)';
     for (let db = -50; db <= -5; db += 10) g.fillRect(Math.floor(w * dbPos(db)), 0, 1, hh);
     if (st && st.status === 'error') {
-      g.fillStyle = 'rgba(15,16,19,0.82)';
+      g.fillStyle = 'rgba(5,12,15,0.85)';
       g.fillRect(0, 0, w, hh);
       g.fillStyle = '#ff8a80';
       g.font = `${11 * dpr}px "Segoe UI", sans-serif`;

@@ -12,6 +12,19 @@ import { fitWhenReady } from './actions.js';
 import { setAppInfo, applyHotkeys } from './settings.js';
 import { toast } from './widgets.js';
 
+/** Taskbar badge (red = recording, amber = paused, cyan = live) and a matching window title. */
+function reportActivity() {
+  const rec = recorder.rec.phase;
+  const live = stream.st.phase === 'live' || stream.st.phase === 'reconnecting';
+  window.api.setActivity({ rec, live });
+  const tags = [];
+  if (rec === 'recording') tags.push('● REC');
+  else if (rec === 'paused') tags.push('❚❚ Paused');
+  else if (rec === 'processing') tags.push('Saving…');
+  if (live) tags.push('LIVE');
+  document.title = tags.length ? `${tags.join(' · ')} — Velocity Studio` : 'Velocity Studio';
+}
+
 async function boot() {
   const info = await window.api.info();
   setAppInfo(info);
@@ -59,6 +72,7 @@ async function boot() {
     if (d.phase === 'reconnecting' && !announcedReconnect) { announcedReconnect = true; toast('Connection to the streaming server was lost — trying to reconnect…', { kind: 'warn', timeout: 6000 }); }
     if (d.phase === 'live' || d.phase === 'idle') announcedReconnect = false;
     window.api.setBusy(recorder.rec.phase !== 'idle' || d.phase !== 'idle');
+    reportActivity();
   });
   window.api.onRequestClose(() => cmd.quitApp());
   window.api.onEncDied((d) => {
@@ -68,7 +82,7 @@ async function boot() {
     }
   });
   recorder.probeHardware();
-  on('recording', (e) => window.api.setBusy(e.detail.phase !== 'idle' || stream.isActive()));
+  on('recording', (e) => { window.api.setBusy(e.detail.phase !== 'idle' || stream.isActive()); reportActivity(); });
 
   if (!recorder.supportedEncoders().length) toast('No supported video encoder found in this build.', { kind: 'error', timeout: 0 });
   if (!info.ffmpeg) toast('ffmpeg is missing — recordings stay in their native format (still playable).', { kind: 'warn', timeout: 8000 });

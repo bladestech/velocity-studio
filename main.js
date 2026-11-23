@@ -4,6 +4,7 @@ const {
   globalShortcut, shell, screen, Menu, safeStorage,
 } = require('electron');
 const net = require('net');
+const { overlayFor } = require('./taskbar');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -47,11 +48,11 @@ function createWindow() {
     minWidth: 1080,
     minHeight: 680,
     show: false,
-    backgroundColor: '#16171a',
+    backgroundColor: '#04090b',
     title: 'Velocity Studio',
     icon: path.join(__dirname, 'src', 'icon.png'),
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#1b1c20', symbolColor: '#c9ccd3', height: 36 },
+    titleBarOverlay: { color: '#04090b', symbolColor: '#b9d3db', height: 40 },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -675,6 +676,17 @@ ipcMain.handle('win:fullscreen', (_e, on) => { if (win) win.setFullScreen(!!on);
 let busy = false;
 let forceQuit = false;
 ipcMain.on('app:busy', (_e, b) => { busy = !!b; });
+
+// Taskbar indicator: red dot while recording, amber bars when paused, cyan dot when live,
+// and an animated progress bar while a recording is being finalised.
+ipcMain.on('app:activity', (_e, a = {}) => {
+  if (!win || win.isDestroyed()) return;
+  const o = overlayFor(a.rec, !!a.live);
+  if (o) win.setOverlayIcon(o.icon, o.description);
+  else win.setOverlayIcon(null, '');
+  if (a.rec === 'processing') win.setProgressBar(2, { mode: 'indeterminate' });
+  else win.setProgressBar(-1);
+});
 ipcMain.handle('app:quit', () => { forceQuit = true; app.quit(); });
 
 /* ------------------------------------------------------------------ */

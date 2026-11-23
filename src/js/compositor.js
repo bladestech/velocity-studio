@@ -129,12 +129,12 @@ function drawItem(item) {
 }
 
 function placeholder(item, res) {
-  ctx.fillStyle = '#1b1d22';
+  ctx.fillStyle = '#0b151a';
   ctx.fillRect(item.x, item.y, item.w, item.h);
-  ctx.strokeStyle = '#3a3e48';
+  ctx.strokeStyle = '#20404b';
   ctx.lineWidth = 2;
   ctx.strokeRect(item.x + 1, item.y + 1, item.w - 2, item.h - 2);
-  ctx.fillStyle = res && res.status === 'error' ? '#ff7a7a' : '#8b91a0';
+  ctx.fillStyle = res && res.status === 'error' ? '#ff7a7a' : '#8da8b1';
   ctx.font = '600 28px "Segoe UI", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';

@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/colebolebole/velocity-studio/releases/latest"><img alt="Version" src="https://img.shields.io/badge/version-1.0.2-4a8bff?style=flat-square"></a>
+  <a href="https://github.com/colebolebole/velocity-studio/releases/latest"><img alt="Version" src="https://img.shields.io/badge/version-1.0.3-33c5e8?style=flat-square"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-2fbf62?style=flat-square"></a>
   <img alt="Platform: Windows 10/11" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078d4?style=flat-square">
   <img alt="Electron 45" src="https://img.shields.io/badge/Electron-45-47848f?style=flat-square&logo=electron&logoColor=white">
@@ -39,6 +39,7 @@ Grab `Velocity Studio Setup <version>.exe` from the [latest release](https://git
 - **NVIDIA NVENC** - H.264, HEVC and AV1 hardware encoding (auto-detected; used automatically when available) with preset, VBR / CBR / constant-quality controls. Frames are converted to NV12 on the GPU and piped to ffmpeg's NVENC encoder.
 - **Recording** - also Chromium's H.264, VP9, VP8 and AV1 encoders; 720p-4K at 24-60 fps; MP4 / MKV / WebM; bitrate control; pause/resume; streamed straight to disk.
 - **Global hotkeys** - F9 start/stop recording, F10 pause, F11 screenshot, plus an optional start/stop streaming key (all rebindable in Settings).
+- **Taskbar indicator** - the taskbar button shows a red dot while recording, amber bars when paused, a cyan dot while live, and a progress bar while a recording is being saved; the window title mirrors it.
 - **Hides itself** from captures (no infinite mirror), optional minimise-on-record.
 - Keeps recording while minimised or covered by other windows.
 
