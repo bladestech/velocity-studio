@@ -282,10 +282,10 @@ ipcMain.handle('rec:close', async (_e, id, opts = {}) => {
 });
 
 /* ------------------------------------------------------------------ */
-/* Hardware encoding (NVIDIA NVENC / AMD AMF via ffmpeg)               */
+/* Encoding via ffmpeg (NVENC / AMF / Quick Sync / x264 / x265)       */
 /*                                                                     */
 /* The renderer composites the scene, converts it to NV12 on the GPU    */
-/* and streams raw frames here. They are piped into ffmpeg (NVENC/AMF)*/
+/* and streams raw frames here. They are piped into ffmpeg's encoder, */
 /* the mixed audio arrives as a separate Opus file; both are muxed into */
 /* the final container when recording stops.                           */
 /* ------------------------------------------------------------------ */
@@ -385,6 +385,14 @@ ipcMain.handle('ffmpeg:install', async (_e, which) => {
 
 ipcMain.handle('ffmpeg:cancel', () => { if (ffInstall) ffInstall.ctrl.abort(); return true; });
 
+// Only the compatibility build can be removed (done when it turned out not to rescue any encoder).
+ipcMain.handle('ffmpeg:remove', (_e, which) => {
+  if (which !== 'legacy' || ffInstall) return false;
+  try { fs.rmSync(ffDir('legacy'), { recursive: true, force: true }); } catch { return false; }
+  probeCache = null;
+  return true;
+});
+
 const familyOf = (ffCodec) => (/_nvenc$/.test(ffCodec) ? 'nvenc' : /_amf$/.test(ffCodec) ? 'amf' : /_qsv$/.test(ffCodec) ? 'qsv' : ffCodec === 'libx265' ? 'x265' : 'x264');
 const pick = (v, allowed, def) => (allowed.includes(v) ? v : def);
 const PRESETS = {
@@ -468,7 +476,9 @@ ipcMain.handle('gpu:info', async () => {
     const info = await app.getGPUInfo('complete');
     const devs = (info.gpuDevice || []).filter((d) => d.deviceString && !/basic render/i.test(d.deviceString));
     const d = devs.find((x) => x.active) || devs[0];
-    if (d) return { name: d.deviceString, vendorId: d.vendorId, driver: d.driverVersion || '' };
+    // Every GPU, not just the active one: laptops often pair Intel graphics with an NVIDIA / AMD card.
+    const devices = devs.map((x) => ({ name: x.deviceString, vendorId: x.vendorId, driver: x.driverVersion || '' }));
+    if (d) return { name: d.deviceString, vendorId: d.vendorId, driver: d.driverVersion || '', devices };
     const m = /ANGLE \([^,]+, ([^(,]+)/.exec((info.auxAttributes || {}).glRenderer || '');
     return { name: m ? m[1].trim() : 'Unknown GPU', vendorId: 0, driver: '' };
   } catch { return { name: 'Unknown GPU', vendorId: 0, driver: '' }; }

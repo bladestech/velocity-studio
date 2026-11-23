@@ -16,8 +16,9 @@ module.exports = {
     exe: 'ffmpeg-9.1-essentials_build/bin/ffmpeg.exe',
     licenseEntry: 'ffmpeg-9.1-essentials_build/LICENSE',
   },
-  // The build Velocity Studio shipped before (ffmpeg-static b6.1.1). Only downloaded, and only used, for an
-  // encoder that won't start on the main build - e.g. NVENC on NVIDIA drivers older than ffmpeg 9.1 requires.
+  // The build Velocity Studio shipped before (ffmpeg-static b6.1.1). Only downloaded, and only used, for a
+  // GPU encoder that won't start on the main build: NVENC on NVIDIA drivers older than ffmpeg 9.1 requires (610),
+  // and possibly AMF / Quick Sync on older AMD / Intel drivers. It is removed again if it rescues nothing.
   legacy: {
     version: '6.1.1',
     label: 'ffmpeg 6.1.1 (compatibility)',

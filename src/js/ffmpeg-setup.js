@@ -2,9 +2,9 @@
 // logo on screen and asks to download it. While it downloads, the V fills up (vloader.js); then the app launches
 // as usual. "Not now" keeps the built-in (Chromium) encoders, and Settings -> Output offers the download later.
 //
-// After the main build is installed the encoders are probed. If the PC has an NVIDIA GPU whose NVENC won't start
-// on it (driver older than the main build needs), the V refills for the smaller compatibility build (6.1.1),
-// which main.js then uses for those encoders only.
+// After the main build is installed the encoders are probed. If any GPU's hardware encoder (NVENC, AMF or
+// Quick Sync) won't start on it - typically an older driver - the V refills for the smaller compatibility build
+// (6.1.1), which main.js then uses for those encoders only. If it doesn't rescue any encoder, it is removed.
 import { state, save } from './store.js';
 import { h } from './util.js';
 import { modal, toast } from './widgets.js';
@@ -54,19 +54,21 @@ async function installFlow(ui) {
   ui.status('Checking your encoders…', 'Testing which ones work on this PC');
   await recorder.probeHardware();
 
-  // NVIDIA GPU but NVENC didn't start: try the compatibility build (works with older drivers).
+  // A GPU whose hardware encoder didn't start (usually an older driver): try the compatibility build.
   const gpu = await window.api.gpuInfo().catch(() => null);
-  if (gpu && gpu.vendorId === 0x10de && !recorder.hasNvenc() && !st.legacy) {
+  if (recorder.gpusMissingEncoder(gpu).length && !st.legacy) {
     ui.loader.setBusy(false);
     ui.loader.setProgress(0); // drain, then refill for the second download
     await sleep(700);
-    const r = await run('legacy', 'Getting the compatibility build for your NVIDIA driver');
+    const r = await run('legacy', 'Getting the compatibility build for your graphics driver');
     if (r.ok) {
       ui.loader.setProgress(1); ui.loader.setBusy(true);
       ui.status('Checking your encoders…', 'Testing which ones work on this PC');
       await recorder.probeHardware();
+      // It didn't rescue anything (the driver is the problem): don't keep 30 MB around for nothing.
+      if (!recorder.usesLegacy()) { await window.api.ffmpegRemove('legacy'); await recorder.probeHardware(); }
     } else if (r.cancelled) return r;
-    // A failed compatibility download isn't fatal: everything except NVENC already works.
+    // A failed compatibility download isn't fatal: everything else already works.
   }
   ui.loader.setBusy(false);
   return { ok: true };

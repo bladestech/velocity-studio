@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>An OBS-style screen recorder and live streamer for Windows.</b><br>
-  Scenes, an audio mixer, NVENC hardware encoding, and one-click streaming to Twitch, YouTube, Kick and more.
+  Scenes, an audio mixer, GPU encoding (NVIDIA, AMD and Intel), and one-click streaming to Twitch, YouTube, Kick and more.
 </p>
 
 <p align="center">
@@ -41,7 +41,7 @@ On first launch the app offers to download **ffmpeg** (about 120 MB, one time), 
 - **Audio mixer** - System audio (Windows loopback) + any number of microphones / capture devices / virtual cables, stereo peak meters, faders (-60..+12 dB), mute. Switch each channel's source from the gear button or Settings -> Audio; channels recover automatically when devices change.
 - **Live streaming** - Twitch, YouTube Live, Facebook Live, Kick, Restream, or any custom RTMP/RTMPS ingest (TikTok, Instagram, X, Rumble...). Encodes with NVENC, AMD AMF or Intel Quick Sync (or x264 on the CPU, with a selectable preset), CBR with 2 s keyframes, optional downscale / lower fps, auto-reconnect. Stream keys are encrypted with Windows DPAPI and never written to the settings file. Streaming and recording can run at once.
 - **Hardware & software encoding** - NVIDIA NVENC, AMD AMF and Intel Quick Sync (H.264, HEVC and AV1 where the GPU supports it), plus x264 / x265 on the CPU. Each encoder is auto-detected; Settings -> Output lets you pick Automatic, Hardware, Software or Built-in, then the encoder, its own presets, VBR / CBR / constant quality and the keyframe interval. Frames are converted to NV12 on the GPU and piped to the bundled ffmpeg 9.1.
-  - ffmpeg 9.1's NVENC needs **NVIDIA driver 610 or newer**. On older drivers the app also downloads the smaller ffmpeg 6.1.1 compatibility build (about 30 MB) and uses it for NVENC only, so GPU encoding keeps working. Settings and the benchmark suggest a driver update when a GPU's encoder doesn't start.
+  - ffmpeg 9.1's NVENC needs **NVIDIA driver 610 or newer**. If any GPU's encoder (NVENC, AMF or Quick Sync) won't start on ffmpeg 9.1, usually because of an older driver, the app also downloads the smaller ffmpeg 6.1.1 compatibility build (about 30 MB) and uses it for just those encoders. If it doesn't help, it's removed again. Settings and the benchmark suggest a driver update when a GPU's encoder doesn't start.
 - **Encoder benchmark** - on first launch (and whenever the graphics card changes) Velocity Studio times real encodes at your output resolution and frame rate with every encoder your PC supports, finds the best-quality preset each one sustains in real time, and recommends a recording profile and streaming encoder. Works on any GPU or CPU-only PC; re-run it any time from Settings -> Output.
 - **Recording** - also Chromium's H.264, VP9, VP8 and AV1 encoders as a fallback; 720p-4K at 24-60 fps; MP4 / MKV / WebM; bitrate control; pause/resume; streamed straight to disk.
 - **Global hotkeys** - F9 start/stop recording, F10 pause, F11 screenshot, plus an optional start/stop streaming key (all rebindable in Settings).

@@ -32,17 +32,17 @@ export function nvidiaDriver(ver) {
   return Number(`${d.slice(0, 3)}.${d.slice(3)}`) || null;
 }
 
-/** A hint when the PC has a GPU whose hardware encoder did not start (usually an outdated driver), else null. */
+/** A hint for each GPU whose hardware encoder did not start (usually an outdated driver), else null. */
 export function driverHint(gpu) {
-  if (!gpu) return null;
-  const v = gpu.vendorId;
-  if (v === 0x10de && !recorder.hasNvenc()) {
-    const have = nvidiaDriver(gpu.driver);
-    return `NVIDIA NVENC isn’t available. It needs NVIDIA driver ${NVENC_MIN_DRIVER} or newer${have ? ` (this PC has ${have.toFixed(2)})` : ''}. Update your graphics driver, then restart Velocity Studio.`;
-  }
-  if (v === 0x1002 && !recorder.hasAmf()) return 'AMD AMF isn’t available. Updating your AMD Software (Adrenalin) driver usually enables it; restart Velocity Studio afterwards.';
-  if (v === 0x8086 && !recorder.ENCODERS.some((e) => e.family === 'qsv' && recorder.supportedEncoders().includes(e))) return 'Intel Quick Sync isn’t available. Updating your Intel graphics driver usually enables it; restart Velocity Studio afterwards.';
-  return null;
+  const hints = recorder.gpusMissingEncoder(gpu).map((d) => {
+    if (d.vendorId === 0x10de) {
+      const have = nvidiaDriver(d.driver);
+      return `NVIDIA NVENC isn’t available. It needs NVIDIA driver ${NVENC_MIN_DRIVER} or newer${have ? ` (this PC has ${have.toFixed(2)})` : ''}. Update your graphics driver, then restart Velocity Studio.`;
+    }
+    if (d.vendorId === 0x1002) return 'AMD AMF isn’t available. Updating your AMD Software (Adrenalin) driver usually enables it; restart Velocity Studio afterwards.';
+    return 'Intel Quick Sync isn’t available. Updating your Intel graphics driver usually enables it; restart Velocity Studio afterwards.';
+  });
+  return hints.length ? hints.join(' ') : null;
 }
 
 const presetsBestFirst = (fam) => FAMILIES[fam].presets.map(([v]) => v).reverse();
