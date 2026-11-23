@@ -9,7 +9,8 @@ import { resetAll, sync } from './resources.js';
 import { icon } from './icons.js';
 import * as audio from './audio.js';
 import * as stream from './stream.js';
-import { openBenchmark } from './benchmark.js';
+import { openBenchmark, driverHint } from './benchmark.js';
+import { installFromSettings } from './ffmpeg-setup.js';
 
 let appInfo = null;
 export const setAppInfo = (i) => { appInfo = i; };
@@ -148,10 +149,25 @@ export function openSettings() {
       openBenchmark({ reason: 'manual' }).then(() => openSettings());
     } }, b && !b.skipped && !b.kept ? 'Run again' : 'Run benchmark'));
 
+  // ffmpeg not downloaded yet (skipped on first launch, or the download failed): offer it here.
+  const ffCard = h('div', { class: 'ff-card', hidden: true },
+    h('span', { class: 'bench-card-ic', html: icon('folder', 18) }),
+    h('div', { class: 'bench-card-text' }, h('div', { class: 'bench-card-title' }, 'ffmpeg isn’t installed'), h('div', { class: 'field-hint' }, 'GPU (NVENC / AMF / Quick Sync) and x264 / x265 encoding need it. Until then, recordings use the built-in encoder.')),
+    h('button', { class: 'btn primary', type: 'button', onclick: () => {
+      if (closeSettings) closeSettings(null);
+      installFromSettings()
+        .then((ok) => (ok && !state.settings.benchmark ? openBenchmark({ reason: 'first-run' }) : null))
+        .then(() => openSettings());
+    } }, 'Download ffmpeg'));
+  window.api.ffmpegStatus().then((st) => { ffCard.hidden = st.main; }).catch(() => {});
+  const gpuNote = h('p', { class: 'note warn', hidden: true });
+  window.api.gpuInfo().then((g) => { const t = driverHint(g); if (t) { gpuNote.textContent = t; gpuNote.hidden = false; } }).catch(() => {});
   const out = h('div', { class: 'pane' },
     section('Encoder',
+      ffCard,
       field('Encoder type', typeSeg),
       autoInfo,
+      gpuNote,
       encPick, tuneBox, brBox, cqBox,
       locked ? h('p', { class: 'note warn' }, 'Changes apply to the next recording.') : null,
       benchCard),

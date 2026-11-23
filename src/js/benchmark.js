@@ -21,6 +21,30 @@ const CODEC_RANK = { av1: 3, hevc: 2, h264: 1 };
 const FAMILY_RANK = { nvenc: 3, amf: 2, qsv: 1, x264: 0, x265: 0 };
 const CODEC_NAME = { h264: 'H.264', hevc: 'HEVC', av1: 'AV1' };
 
+// NVENC in the bundled ffmpeg build needs at least this NVIDIA driver (from the build's own NVENC check).
+export const NVENC_MIN_DRIVER = 610;
+
+/** NVIDIA's Windows driver version (e.g. "32.0.15.6094") as the familiar number (560.94), or null. */
+export function nvidiaDriver(ver) {
+  const p = String(ver || '').split('.');
+  if (p.length !== 4) return null;
+  const d = (p[2] + p[3].padStart(4, '0')).slice(-5);
+  return Number(`${d.slice(0, 3)}.${d.slice(3)}`) || null;
+}
+
+/** A hint when the PC has a GPU whose hardware encoder did not start (usually an outdated driver), else null. */
+export function driverHint(gpu) {
+  if (!gpu) return null;
+  const v = gpu.vendorId;
+  if (v === 0x10de && !recorder.hasNvenc()) {
+    const have = nvidiaDriver(gpu.driver);
+    return `NVIDIA NVENC isn’t available. It needs NVIDIA driver ${NVENC_MIN_DRIVER} or newer${have ? ` (this PC has ${have.toFixed(2)})` : ''}. Update your graphics driver, then restart Velocity Studio.`;
+  }
+  if (v === 0x1002 && !recorder.hasAmf()) return 'AMD AMF isn’t available. Updating your AMD Software (Adrenalin) driver usually enables it; restart Velocity Studio afterwards.';
+  if (v === 0x8086 && !recorder.ENCODERS.some((e) => e.family === 'qsv' && recorder.supportedEncoders().includes(e))) return 'Intel Quick Sync isn’t available. Updating your Intel graphics driver usually enables it; restart Velocity Studio afterwards.';
+  return null;
+}
+
 const presetsBestFirst = (fam) => FAMILIES[fam].presets.map(([v]) => v).reverse();
 const presetLabel = (fam, v) => (FAMILIES[fam].presets.find(([p]) => p === v) || [v, v])[1].replace(/ \(.*\)$/, '');
 
@@ -138,7 +162,7 @@ function wizard(reason, gpu) {
       chip('display', 'Graphics card', gpu.name || 'Unknown GPU'),
       chip('record', 'Output', `${outW}×${outH} · ${fps} fps`),
       chip('gear', 'Encoders', String(jobs.filter((j) => !j.live).length))),
-    swOnly ? h('p', { class: 'note warn' }, 'No hardware encoder was found on this PC, so software (CPU) encoders will be tested. Updating your graphics driver may enable GPU encoding.') : null,
+    driverHint(gpu) ? h('p', { class: 'note warn' }, driverHint(gpu)) : swOnly ? h('p', { class: 'note warn' }, 'No hardware encoder was found on this PC, so software (CPU) encoders will be tested. Updating your graphics driver may enable GPU encoding.') : null,
     h('p', { class: 'note' }, 'Takes about 15–60 seconds. For accurate results, close games and other heavy apps first. Nothing is recorded or uploaded.'));
 
   const later = () => {

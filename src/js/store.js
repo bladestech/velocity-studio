@@ -27,6 +27,7 @@ export const DEFAULT_SETTINGS = {
   },
   // Last encoder benchmark ({ gpu, at, results, ... }); null until it has run on this PC.
   benchmark: null,
+  ffmpegDeclined: false, // chose "Not now" on the first-launch ffmpeg download
   // Stream keys are NOT stored here (see stream.js / main.js secrets).
   stream: { service: 'twitch', servers: {}, bitrate: 6000, audioBitrate: 160, height: 0, fps: 0, encoder: 'auto', preset: 'veryfast', reconnect: true },
 };

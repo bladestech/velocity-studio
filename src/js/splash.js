@@ -54,6 +54,27 @@ function freeze(el) {
   return from;
 }
 
+let introPromise = null;
+
+/** Resolves once the intro (tile + V settling in) has played. Shared by the launch and the ffmpeg setup screen. */
+export function introDone() {
+  if (introPromise) return introPromise;
+  introPromise = (async () => {
+    const root = document.getElementById('splash');
+    if (!root) return;
+    const imgs = [...root.querySelectorAll('.splash-v')];
+    await Promise.all(imgs.map((i) => (i.decode ? i.decode().catch(() => {}) : null)));
+    // CSS animations only start ticking once frames are actually produced, so wait for the intro itself
+    // (capped, in case the window isn't painting) rather than trusting the clock.
+    const intro = ['.splash-tile', '.splash-glow', '.splash-flight']
+      .flatMap((sel) => root.querySelector(sel).getAnimations())
+      .filter((a) => a.animationName !== 'splash-breathe');
+    await Promise.race([Promise.all(intro.map((a) => a.finished.catch(() => {}))), sleep(INTRO_MS * 2)]);
+    intro.forEach((a) => { try { a.finish(); } catch { /* already done */ } });
+  })();
+  return introPromise;
+}
+
 let finishing = null;
 
 /** Launch the V and reveal the app. Safe to call more than once. */
@@ -81,13 +102,7 @@ async function run(instant) {
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   if (instant) { cleanup(); return; }
 
-  const imgs = [...root.querySelectorAll('.splash-v')];
-  await Promise.all(imgs.map((i) => (i.decode ? i.decode().catch(() => {}) : null)));
-  // CSS animations only start ticking once frames are actually produced, so wait for the intro itself
-  // (capped, in case the window isn't painting) rather than trusting the clock, then hold a beat.
-  const intro = root.getAnimations({ subtree: true }).filter((a) => a.animationName !== 'splash-breathe');
-  await Promise.race([Promise.all(intro.map((a) => a.finished.catch(() => {}))), sleep(INTRO_MS * 2)]);
-  intro.forEach((a) => { try { a.finish(); } catch { /* already done */ } });
+  await introDone();
   await sleep(HOLD_MS);
 
   const bg = root.querySelector('.splash-bg');
