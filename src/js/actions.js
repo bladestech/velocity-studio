@@ -242,7 +242,7 @@ export function nudge(dx, dy) {
 /* ---------------- Audio ---------------- */
 export async function addAudioChannel() {
   const inputs = await audio.listInputs();
-  const sel = select([{ value: '__desktop', label: 'System audio — everything you hear (loopback)' }, ...inputs.map((d) => ({ value: d.id, label: d.label }))], '__desktop');
+  const sel = select([{ value: '__desktop', label: 'System audio (everything you hear, loopback)' }, ...inputs.map((d) => ({ value: d.id, label: d.label }))], '__desktop');
   const name = h('input', { type: 'text', class: 'text-input', value: 'Desktop Audio 2' });
   sel.addEventListener('change', () => {
     name.value = sel.value === '__desktop' ? 'Desktop Audio 2' : (sel.options[sel.selectedIndex].text.replace(/\s*\(.*\)\s*$/, '').slice(0, 32) || 'Mic/Aux 2');

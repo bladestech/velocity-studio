@@ -1,10 +1,10 @@
-// Live streaming controller (RTMP / RTMPS). Video: shared GPU NV12 frames -> ffmpeg (NVENC or x264).
+// Live streaming controller (RTMP / RTMPS). Video: shared GPU NV12 frames -> ffmpeg (NVENC, AMF, QSV or x264).
 // Audio: mixer output tapped as PCM. Keys live in memory + DPAPI-encrypted storage, never in settings.
 import { state, emit } from './store.js';
 import * as compositor from './compositor.js';
 import * as audio from './audio.js';
 import * as frames from './frames.js';
-import { hasNvencH264 } from './recorder.js';
+import { hasNvencH264, hasAmfH264, hasQsvH264 } from './recorder.js';
 
 export const SERVICES = [
   { id: 'twitch', name: 'Twitch', server: 'rtmp://live.twitch.tv/app', hint: 'Key: dashboard.twitch.tv → Settings → Stream. Twitch recommends up to 6000 kbps.' },
@@ -57,9 +57,11 @@ export function currentServer() {
 
 export function chooseEncoder() {
   const e = state.settings.stream.encoder;
-  if (e === 'nvenc') return hasNvencH264() ? 'nvenc' : 'x264';
+  const hw = { nvenc: hasNvencH264(), amf: hasAmfH264(), qsv: hasQsvH264() };
   if (e === 'x264') return 'x264';
-  return hasNvencH264() ? 'nvenc' : 'x264';
+  if (hw[e]) return e;
+  if (e in hw) return 'x264'; // chosen GPU encoder isn't available on this PC
+  return hw.nvenc ? 'nvenc' : hw.amf ? 'amf' : hw.qsv ? 'qsv' : 'x264';
 }
 
 export async function start() {
@@ -85,7 +87,7 @@ export async function start() {
   setPhase('connecting');
   const r = await window.api.streamStart({
     server, key, w, h, fps: canvasFps, outW, outH, outFps,
-    bitrate: cfg.bitrate, audioBitrate: cfg.audioBitrate, encoder: chooseEncoder(), reconnect: cfg.reconnect,
+    bitrate: cfg.bitrate, audioBitrate: cfg.audioBitrate, encoder: chooseEncoder(), preset: cfg.preset, reconnect: cfg.reconnect,
   });
   if (!r.ok) { setPhase('idle'); return r; }
   st.id = r.id;

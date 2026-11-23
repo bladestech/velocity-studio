@@ -16,9 +16,19 @@ export const DEFAULT_SETTINGS = {
   minimizeOnRecord: false,
   hideFromCapture: true,
   hotkeys: { record: 'F9', pause: 'F10', screenshot: 'F11', stream: '' },
-  nvenc: { preset: 'p5', rc: 'vbr', cq: 21 },
+  keyint: 2, // keyframe interval, seconds
+  // Per encoder family, so switching encoders never loses its tuning. rc: vbr | cbr | cq.
+  tuning: {
+    nvenc: { preset: 'p5', rc: 'vbr', cq: 21 },
+    amf: { preset: 'quality', rc: 'vbr', cq: 22 },
+    qsv: { preset: 'medium', rc: 'vbr', cq: 23 },
+    x264: { preset: 'veryfast', rc: 'vbr', cq: 21 },
+    x265: { preset: 'superfast', rc: 'vbr', cq: 24 },
+  },
+  // Last encoder benchmark ({ gpu, at, results, ... }); null until it has run on this PC.
+  benchmark: null,
   // Stream keys are NOT stored here (see stream.js / main.js secrets).
-  stream: { service: 'twitch', servers: {}, bitrate: 6000, audioBitrate: 160, height: 0, fps: 0, encoder: 'auto', reconnect: true },
+  stream: { service: 'twitch', servers: {}, bitrate: 6000, audioBitrate: 160, height: 0, fps: 0, encoder: 'auto', preset: 'veryfast', reconnect: true },
 };
 
 export const state = {
@@ -79,12 +89,32 @@ export function newItem(kind, name, props, w, h) {
   };
 }
 
+/** Saved settings over the defaults, migrating the old per-vendor nvenc / amf blocks into settings.tuning. */
+function mergeSettings(saved) {
+  const def = deepClone(DEFAULT_SETTINGS);
+  const tuning = { ...def.tuning };
+  for (const fam of Object.keys(tuning)) tuning[fam] = { ...tuning[fam], ...((saved.tuning || {})[fam]) };
+  if (saved.nvenc && !(saved.tuning && saved.tuning.nvenc)) tuning.nvenc = { ...tuning.nvenc, ...saved.nvenc };
+  if (saved.amf && !(saved.tuning && saved.tuning.amf)) {
+    const { quality, ...rest } = saved.amf;
+    tuning.amf = { ...tuning.amf, ...rest, ...(quality ? { preset: quality } : {}) };
+  }
+  const out = {
+    ...def, ...saved,
+    hotkeys: { ...def.hotkeys, ...saved.hotkeys },
+    stream: { ...def.stream, ...saved.stream },
+    tuning,
+  };
+  delete out.nvenc; delete out.amf;
+  return out;
+}
+
 export function load() {
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch { saved = null; }
   if (saved && Array.isArray(saved.scenes) && saved.scenes.length) {
     state.firstRun = false;
-    state.settings = { ...deepClone(DEFAULT_SETTINGS), ...saved.settings, hotkeys: { ...DEFAULT_SETTINGS.hotkeys, ...(saved.settings || {}).hotkeys }, nvenc: { ...DEFAULT_SETTINGS.nvenc, ...(saved.settings || {}).nvenc }, stream: { ...deepClone(DEFAULT_SETTINGS.stream), ...(saved.settings || {}).stream } };
+    state.settings = mergeSettings(saved.settings || {});
     state.scenes = saved.scenes;
     state.activeSceneId = saved.activeSceneId && saved.scenes.some((s) => s.id === saved.activeSceneId) ? saved.activeSceneId : saved.scenes[0].id;
     state.audio = Array.isArray(saved.audio) && saved.audio.length ? saved.audio : defaultAudio();

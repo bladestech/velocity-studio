@@ -23,7 +23,7 @@ export async function stopRecording() {
     return;
   }
   const name = r.path.split(/[\\/]/).pop();
-  const drop = r.dropped > Math.max(4, (r.durationMs / 1000) * state.settings.fps * 0.01) ?`\nEncoder skipped ${r.dropped} frame(s) — try a faster NVENC preset or lower resolution/fps.` : '';
+  const drop = r.dropped > Math.max(4, (r.durationMs / 1000) * state.settings.fps * 0.01) ?`\nEncoder skipped ${r.dropped} frame(s). Try a faster encoder preset or lower resolution/fps.` : '';
   toast(`Saved ${name} · ${fmtTime(r.durationMs)} · ${fmtBytes(r.bytes)}${r.warning ? `\n${r.warning}` : ''}${drop}`, {
     kind: r.warning ? 'warn' : 'success',
     timeout: 12000,
@@ -67,7 +67,7 @@ export async function toggleStreaming() {
 
 export async function quitApp() {
   if (recorder.rec.phase === 'processing') {
-    toast('Finishing your recording — Velocity Studio will be ready to close in a moment.', { kind: 'warn' });
+    toast('Finishing your recording. Velocity Studio will close in a moment.', { kind: 'warn' });
     return;
   }
   if (stream.isActive()) await stream.stop();

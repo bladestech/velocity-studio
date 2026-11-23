@@ -42,6 +42,8 @@ function renderSources() {
   const list = $('#source-list');
   const sc = activeScene();
   list.replaceChildren();
+  const emptyStage = $('#stage-empty');
+  if (emptyStage) emptyStage.classList.toggle('show', !sc || !sc.items.length);
   if (!sc || !sc.items.length) {
     list.append(h('div', { class: 'empty-hint' }, h('div', { html: icon('plus', 22) }), h('div', {}, 'No sources'), h('small', {}, 'Click + below to add a display, window or webcam.')));
     return;
@@ -113,10 +115,13 @@ function renderMixer() {
   meters.clear();
   for (const ch of state.audio) {
     const dbEl = h('span', { class: 'ch-db' }, fmtDb(ch.volumeDb));
-    const canvas = h('canvas', { class: 'meter', height: 22 });
+    const canvas = h('canvas', { class: 'meter', height: 12 });
     const slider = h('input', { type: 'range', class: 'fader', min: -60, max: 12, step: 0.5, value: ch.volumeDb });
-    slider.addEventListener('input', () => { A.setVolume(ch, Number(slider.value)); dbEl.textContent = fmtDb(ch.volumeDb); });
-    slider.addEventListener('dblclick', () => { slider.value = 0; A.setVolume(ch, 0); dbEl.textContent = fmtDb(0); });
+    const fill = () => slider.style.setProperty('--fill', `${((Number(slider.value) + 60) / 72) * 100}%`);
+    fill();
+    slider.addEventListener('input', () => { A.setVolume(ch, Number(slider.value)); dbEl.textContent = fmtDb(ch.volumeDb); fill(); });
+    slider.addEventListener('dblclick', () => { slider.value = 0; A.setVolume(ch, 0); dbEl.textContent = fmtDb(0); fill(); });
+    const statusEl = h('div', { class: 'ch-status' });
     const muteBtn = h('button', {
       class: `mini-btn mute ${ch.muted ? 'on' : ''}`,
       title: ch.muted ? 'Unmute' : 'Mute',
@@ -137,10 +142,11 @@ function renderMixer() {
     });
     const row = h('div', { class: `mixer-ch ${ch.muted ? 'muted' : ''}` },
       h('div', { class: 'ch-top' }, h('span', { class: 'ch-name', title: ch.name }, ch.name), dbEl),
+      statusEl,
       canvas,
       h('div', { class: 'ch-ctrl' }, muteBtn, slider, gear));
     list.append(row);
-    meters.set(ch.id, { canvas, row, cfg: ch });
+    meters.set(ch.id, { canvas, row, cfg: ch, statusEl, err: null });
   }
 }
 
@@ -157,11 +163,12 @@ function drawMeters() {
     if (c.width !== w || c.height !== hh) { c.width = w; c.height = hh; }
     const g = c.getContext('2d');
     g.clearRect(0, 0, w, hh);
-    g.fillStyle = '#050c0f';
-    g.fillRect(0, 0, w, hh);
     const lv = audio.levels(id);
     const st = audio.getStatus(id);
-    const barH = Math.floor((hh - 3 * dpr) / 2);
+    // Errors are shown as text above the meter (not painted into it).
+    const err = st && st.status === 'error' ? `Unavailable: ${st.error}` : null;
+    if (err !== m.err) { m.err = err; m.row.classList.toggle('error', !!err); m.statusEl.textContent = err || ''; m.statusEl.title = err || ''; }
+    const barH = Math.floor((hh - dpr) / 2);
     const grad = g.createLinearGradient(0, 0, w, 0);
     grad.addColorStop(0, '#2fbf62');
     grad.addColorStop(0.7, '#2fbf62');
@@ -170,8 +177,8 @@ function drawMeters() {
     grad.addColorStop(0.95, '#e5483f');
     grad.addColorStop(1, '#e5483f');
     for (let i = 0; i < 2; i++) {
-      const y = Math.floor(dpr + i * (barH + dpr));
-      g.fillStyle = '#0e1b21';
+      const y = Math.floor(i * (barH + dpr));
+      g.fillStyle = '#0f1e24';
       g.fillRect(0, y, w, barH);
       if (lv.ok && !m.cfg.muted) {
         g.fillStyle = grad;
@@ -180,16 +187,8 @@ function drawMeters() {
         if (hx > 2) { g.fillStyle = '#e3f1f5'; g.fillRect(hx - Math.ceil(dpr), y, Math.ceil(dpr * 1.5), barH); }
       }
     }
-    g.fillStyle = 'rgba(255,255,255,0.12)';
-    for (let db = -50; db <= -5; db += 10) g.fillRect(Math.floor(w * dbPos(db)), 0, 1, hh);
-    if (st && st.status === 'error') {
-      g.fillStyle = 'rgba(5,12,15,0.85)';
-      g.fillRect(0, 0, w, hh);
-      g.fillStyle = '#ff8a80';
-      g.font = `${11 * dpr}px "Segoe UI", sans-serif`;
-      g.textBaseline = 'middle';
-      g.fillText(`Unavailable — ${st.error}`.slice(0, 60), 8 * dpr, hh / 2);
-    }
+    g.fillStyle = 'rgba(4,9,11,0.9)';
+    for (let db = -50; db <= -5; db += 10) g.fillRect(Math.floor(w * dbPos(db)), 0, Math.max(1, Math.round(dpr)), hh);
   }
   requestAnimationFrame(drawMeters);
 }
@@ -253,7 +252,8 @@ function renderStatus() {
   $('#st-cpu').textContent = `CPU ${lastStats.cpu.toFixed(1)}%`;
   $('#st-disk').textContent = lastStats.free != null ? `Free ${fmtBytes(lastStats.free)}` : '';
   const enc = recorder.chooseEncoder();
-  const rate = state.settings.nvenc.rc === 'cq' && enc && enc.backend === 'ffmpeg' ? `CQ ${state.settings.nvenc.cq}` : `${state.settings.videoBitrate / 1000} Mbps`;
+  const tune = recorder.tuningFor(enc);
+  const rate = tune && tune.rc === 'cq' ? `CQ ${tune.cq}` : `${state.settings.videoBitrate / 1000} Mbps`;
   $('#st-enc').textContent = enc ? `${enc.short} · ${rate} → ${state.settings.container.toUpperCase()}` : '';
 }
 
@@ -318,6 +318,7 @@ export function init() {
   $('#btn-up-source').onclick = () => { const it = selectedItem(); if (it) A.moveItem(it, 'up'); };
   $('#btn-down-source').onclick = () => { const it = selectedItem(); if (it) A.moveItem(it, 'down'); };
   $('#btn-add-audio').onclick = () => A.addAudioChannel();
+  $('#btn-empty-add').onclick = (e) => { const r = e.currentTarget.getBoundingClientRect(); addSourceMenu(r.left, r.bottom + 6); };
   $('#btn-stream').onclick = () => cmd.toggleStreaming();
   $('#btn-record').onclick = () => cmd.toggleRecording();
   $('#btn-pause').onclick = () => cmd.togglePause();
