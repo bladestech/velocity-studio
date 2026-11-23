@@ -20,6 +20,10 @@ contextBridge.exposeInMainWorld('api', {
   onRecProgress: (cb) => ipcRenderer.on('rec:progress', (_e, d) => cb(d)),
 
   probeEncoders: () => invoke('enc:probe'),
+  gpuInfo: () => invoke('gpu:info'),
+  benchRun: (o) => invoke('bench:run', o),
+  benchCancel: () => invoke('bench:cancel'),
+  onBenchProgress: (cb) => { const f = (_e, d) => cb(d); ipcRenderer.on('bench:progress', f); return () => ipcRenderer.removeListener('bench:progress', f); },
   encStart: (o) => invoke('enc:start', o),
   encFrame: (id, idx, buf) => ipcRenderer.send('enc:frame', id, idx, buf),
   encAudio: (id, buf) => ipcRenderer.send('enc:audio', id, buf),

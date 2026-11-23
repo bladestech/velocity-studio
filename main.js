@@ -274,10 +274,10 @@ ipcMain.handle('rec:close', async (_e, id, opts = {}) => {
 });
 
 /* ------------------------------------------------------------------ */
-/* Hardware encoding (NVENC via ffmpeg)                                */
+/* Hardware encoding (NVIDIA NVENC / AMD AMF via ffmpeg)               */
 /*                                                                     */
 /* The renderer composites the scene, converts it to NV12 on the GPU    */
-/* and streams raw frames here. They are piped into ffmpeg (NVENC) and */
+/* and streams raw frames here. They are piped into ffmpeg (NVENC/AMF)*/
 /* the mixed audio arrives as a separate Opus file; both are muxed into */
 /* the final container when recording stops.                           */
 /* ------------------------------------------------------------------ */
@@ -294,30 +294,205 @@ function runFfmpegProbe(ff, codec) {
   });
 }
 
+// Every encoder the UI can offer. Hardware ones only initialise on a matching GPU, so each is probed with a
+// tiny test encode; failures return instantly, so probing them all in parallel costs well under a second.
+const PROBE_CODECS = [
+  'h264_nvenc', 'hevc_nvenc', 'av1_nvenc',
+  'h264_amf', 'hevc_amf', 'av1_amf',
+  'h264_qsv', 'hevc_qsv', 'av1_qsv',
+  'libx264', 'libx265',
+];
+
 ipcMain.handle('enc:probe', async () => {
   if (probeCache) return probeCache;
   const ff = ffmpegPath();
-  const res = { nvenc: { h264: false, hevc: false, av1: false } };
+  const enc = Object.fromEntries(PROBE_CODECS.map((c) => [c, false]));
   if (ff) {
-    const [h264, hevc, av1] = await Promise.all(['h264_nvenc', 'hevc_nvenc', 'av1_nvenc'].map((c) => runFfmpegProbe(ff, c)));
-    res.nvenc = { h264, hevc, av1 };
+    const ok = await Promise.all(PROBE_CODECS.map((c) => runFfmpegProbe(ff, c)));
+    PROBE_CODECS.forEach((c, i) => { enc[c] = ok[i]; });
   }
-  probeCache = res;
-  return res;
+  probeCache = {
+    enc,
+    // Kept for older renderer code paths.
+    nvenc: { h264: enc.h264_nvenc, hevc: enc.hevc_nvenc, av1: enc.av1_nvenc },
+    amf: { h264: enc.h264_amf, hevc: enc.hevc_amf, av1: enc.av1_amf },
+  };
+  return probeCache;
 });
 
-function nvencArgs(o) {
-  const n = o.nvenc || {};
-  const br = Math.max(1000, Math.round(o.bitrate || 16000));
-  const preset = /^p[1-7]$/.test(n.preset) ? n.preset : 'p5';
-  const args = ['-preset', preset, '-tune', 'hq', '-spatial-aq', '1', '-rc-lookahead', '16', '-g', String(Math.max(1, Math.round(o.fps * 2)))];
-  if (o.ffCodec === 'h264_nvenc') args.push('-profile:v', 'high', '-bf', '2');
-  else if (o.ffCodec === 'hevc_nvenc') args.push('-profile:v', 'main', '-bf', '2');
-  if (n.rc === 'cbr') args.push('-rc', 'cbr', '-b:v', `${br}k`, '-maxrate', `${br}k`, '-bufsize', `${br * 2}k`);
-  else if (n.rc === 'cq') args.push('-rc', 'vbr', '-cq', String(Math.min(51, Math.max(1, Math.round(n.cq || 21)))), '-b:v', '0');
-  else args.push('-rc', 'vbr', '-b:v', `${br}k`, '-maxrate', `${Math.round(br * 1.5)}k`, '-bufsize', `${br * 2}k`);
-  return args;
+const familyOf = (ffCodec) => (/_nvenc$/.test(ffCodec) ? 'nvenc' : /_amf$/.test(ffCodec) ? 'amf' : /_qsv$/.test(ffCodec) ? 'qsv' : ffCodec === 'libx265' ? 'x265' : 'x264');
+const pick = (v, allowed, def) => (allowed.includes(v) ? v : def);
+const PRESETS = {
+  nvenc: ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7'],
+  amf: ['speed', 'balanced', 'quality'],
+  qsv: ['veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow'],
+  x264: ['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow'],
+  x265: ['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium'],
+};
+const DEFAULT_PRESET = { nvenc: 'p5', amf: 'quality', qsv: 'medium', x264: 'veryfast', x265: 'superfast' };
+
+/**
+ * Video encoder arguments for one encode.
+ * o: { ffCodec, fps, bitrate (kbps), tune: { preset, rc: 'vbr'|'cbr'|'cq', cq }, keyint (s), live (streaming) }
+ */
+function encoderArgs(o) {
+  const fam = familyOf(o.ffCodec);
+  const t = o.tune || {};
+  const br = Math.max(500, Math.round(o.bitrate || 16000));
+  const gop = String(Math.max(1, Math.round(o.fps * Math.min(10, Math.max(0.5, Number(o.keyint) || 2)))));
+  const rc = o.live ? 'cbr' : pick(t.rc, ['vbr', 'cbr', 'cq'], 'vbr');
+  const q = Math.min(51, Math.max(1, Math.round(Number(t.cq) || 22)));
+  const preset = pick(t.preset, PRESETS[fam], DEFAULT_PRESET[fam]);
+  const cbr = ['-b:v', `${br}k`, '-maxrate', `${br}k`, '-bufsize', `${br * 2}k`];
+  const vbr = ['-b:v', `${br}k`, '-maxrate', `${Math.round(br * 1.5)}k`, '-bufsize', `${br * 2}k`];
+  const a = [];
+
+  if (fam === 'nvenc') {
+    a.push('-preset', preset, '-tune', 'hq', '-spatial-aq', '1', '-g', gop);
+    if (!o.live) a.push('-rc-lookahead', '16');
+    if (o.ffCodec === 'h264_nvenc') a.push('-profile:v', 'high', '-bf', '2');
+    else if (o.ffCodec === 'hevc_nvenc') a.push('-profile:v', 'main', '-bf', '2');
+    if (rc === 'cbr') a.push('-rc', 'cbr', ...cbr);
+    else if (rc === 'cq') a.push('-rc', 'vbr', '-cq', String(q), '-b:v', '0');
+    else a.push('-rc', 'vbr', ...vbr);
+    if (o.live) a.push('-forced-idr', '1');
+  } else if (fam === 'amf') {
+    // AMD AMF (Radeon VCN). AV1 needs an RX 7000-series (RDNA3) or newer GPU.
+    const isAv1 = o.ffCodec === 'av1_amf';
+    a.push('-usage', 'transcoding', '-quality', preset, '-g', gop);
+    if (o.ffCodec === 'h264_amf') a.push('-profile:v', 'high');
+    if (rc === 'cq') {
+      // Constant QP. H.264/HEVC use 0–51; AV1 uses a 0–255 q-index, so scale the same "feel" across.
+      const qp = String(isAv1 ? q * 5 : q);
+      a.push('-rc', 'cqp', '-qp_i', qp, '-qp_p', qp);
+      if (o.ffCodec === 'h264_amf') a.push('-qp_b', qp);
+    } else if (rc === 'cbr') a.push('-rc', 'cbr', ...cbr);
+    else a.push('-rc', 'vbr_peak', ...vbr);
+    if (!isAv1 && rc !== 'cq') a.push('-vbaq', '1');
+    if (o.live) a.push('-enforce_hrd', '1');
+    if (o.live && o.ffCodec === 'h264_amf') a.push('-header_spacing', gop);
+  } else if (fam === 'qsv') {
+    // Intel Quick Sync. CBR is selected when maxrate == bitrate; ICQ (global_quality) for constant quality.
+    a.push('-preset', preset, '-g', gop);
+    if (o.ffCodec === 'h264_qsv') a.push('-profile:v', 'high');
+    if (rc === 'cq') a.push('-global_quality', String(q));
+    else a.push(...(rc === 'cbr' ? cbr : vbr));
+  } else {
+    // Software (CPU): x264 takes NV12 directly; x265 wants planar 4:2:0.
+    const x265 = fam === 'x265';
+    if (x265) a.push('-pix_fmt', 'yuv420p', '-x265-params', 'log-level=error');
+    else a.push('-profile:v', 'high');
+    a.push('-preset', preset, '-g', gop);
+    if (o.live) a.push('-keyint_min', gop, '-sc_threshold', '0');
+    if (rc === 'cq') a.push('-crf', String(q));
+    else a.push(...(rc === 'cbr' ? cbr : vbr));
+  }
+  return a;
 }
+
+/* ------------------------------------------------------------------ */
+/* Encoder benchmark                                                   */
+/*                                                                     */
+/* Renders a short, moving, noisy NV12 clip once (at the user's output */
+/* size), then times real encodes of it through each candidate encoder */
+/* — the same pixel format and arguments a recording uses — stepping   */
+/* from the best-quality preset down until one keeps up in real time.  */
+/* ------------------------------------------------------------------ */
+ipcMain.handle('gpu:info', async () => {
+  try {
+    const info = await app.getGPUInfo('complete');
+    const devs = (info.gpuDevice || []).filter((d) => d.deviceString && !/basic render/i.test(d.deviceString));
+    const d = devs.find((x) => x.active) || devs[0];
+    if (d) return { name: d.deviceString, vendorId: d.vendorId, driver: d.driverVersion || '' };
+    const m = /ANGLE \([^,]+, ([^(,]+)/.exec((info.auxAttributes || {}).glRenderer || '');
+    return { name: m ? m[1].trim() : 'Unknown GPU', vendorId: 0, driver: '' };
+  } catch { return { name: 'Unknown GPU', vendorId: 0, driver: '' }; }
+});
+
+let bench = null; // { cancelled, proc, clip }
+
+function benchSend(d) { if (win) win.webContents.send('bench:progress', d); }
+
+function runTimed(ff, args, timeoutMs) {
+  return new Promise((resolve) => {
+    const t0 = process.hrtime.bigint();
+    const p = spawn(ff, args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+    if (bench) bench.proc = p;
+    let err = '';
+    p.stderr.on('data', (x) => { err += x.toString(); if (err.length > 4000) err = err.slice(-2000); });
+    const t = setTimeout(() => { try { p.kill(); } catch { /* ignore */ } }, timeoutMs);
+    p.on('error', (e) => { clearTimeout(t); resolve({ ok: false, ms: 0, err: e.message }); });
+    p.on('close', (code) => {
+      clearTimeout(t);
+      resolve({ ok: code === 0, ms: Number(process.hrtime.bigint() - t0) / 1e6, err: err.trim().split('\n').pop() || '' });
+    });
+  });
+}
+
+ipcMain.handle('bench:cancel', () => {
+  if (bench) { bench.cancelled = true; try { if (bench.proc) bench.proc.kill(); } catch { /* ignore */ } }
+  return true;
+});
+
+/**
+ * o: { w, h, fps, bitrate, jobs: [{ id, ffCodec, presets: [best .. fastest], target }] }
+ * target = minimum speed (x real time) a preset must reach to count as "keeps up".
+ * Resolves { ok, results: { [id]: { preset, speed, ok, tried: [{ preset, speed, ok }] } } }.
+ */
+ipcMain.handle('bench:run', async (_e, o) => {
+  const ff = ffmpegPath();
+  if (!ff) return { ok: false, error: 'ffmpeg is not available.' };
+  if (bench) return { ok: false, error: 'A benchmark is already running.' };
+  const w = Math.round(o.w / 2) * 2, h = Math.round(o.h / 2) * 2, fps = Math.max(1, Math.round(o.fps));
+  const CLIP = 30, LOOPS = 3; // 30 unique frames played 4x = 120 frames per trial
+  const frames = CLIP * (LOOPS + 1);
+  const clip = path.join(os.tmpdir(), `velocity-bench-${process.pid}-${Date.now()}.nv12`);
+  bench = { cancelled: false, proc: null, clip };
+  const results = {};
+  try {
+    benchSend({ phase: 'prepare' });
+    // Motion (testsrc2 scrolls) plus temporal grain, so encoders do real work instead of coasting on a static frame.
+    const gen = await runTimed(ff, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i',
+      `testsrc2=s=${w}x${h}:r=${fps},noise=alls=10:allf=t+u,format=nv12`, '-frames:v', String(CLIP), '-f', 'rawvideo', clip], 60000);
+    if (!gen.ok || bench.cancelled) return { ok: false, error: bench.cancelled ? 'cancelled' : `Could not prepare the test clip: ${gen.err}` };
+
+    const total = o.jobs.reduce((n, j) => n + j.presets.length, 0);
+    let done = 0;
+    for (const job of o.jobs) {
+      const r = { preset: null, speed: 0, ok: false, tried: [] };
+      results[job.id] = r;
+      for (const preset of job.presets) {
+        if (bench.cancelled) return { ok: false, error: 'cancelled' };
+        benchSend({ phase: 'encode', id: job.id, preset, done, total });
+        const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y',
+          '-stream_loop', String(LOOPS), '-f', 'rawvideo', '-pix_fmt', 'nv12', '-video_size', `${w}x${h}`, '-framerate', String(fps), '-i', clip,
+          '-c:v', job.ffCodec, ...encoderArgs({ ffCodec: job.ffCodec, fps, bitrate: o.bitrate, keyint: 2, live: !!job.live, tune: { preset, rc: job.live ? 'cbr' : 'vbr' } }),
+          '-f', 'null', '-'];
+        // Give up on a trial once it is clearly far too slow (under ~0.3x real time).
+        const t = await runTimed(ff, args, Math.max(4000, (frames / fps) * 3500));
+        const speed = t.ok && t.ms > 0 ? (frames / fps) / (t.ms / 1000) : 0;
+        const ok = t.ok && speed >= job.target;
+        r.tried.push({ preset, speed, ok, err: t.ok ? undefined : t.err });
+        done++;
+        if (!t.ok && r.tried.length === 1 && !bench.cancelled) {
+          // Encoder failed outright (not just slow): skip its remaining presets.
+          done += job.presets.length - 1;
+          break;
+        }
+        if (ok) { r.preset = preset; r.speed = speed; r.ok = true; done += job.presets.length - r.tried.length; break; }
+      }
+      if (!r.ok && r.tried.length) {
+        const best = r.tried.reduce((a, b) => (b.speed > a.speed ? b : a));
+        r.preset = best.preset; r.speed = best.speed;
+      }
+      benchSend({ phase: 'result', id: job.id, result: r, done, total });
+    }
+    return { ok: true, results };
+  } finally {
+    try { fs.unlinkSync(clip); } catch { /* ignore */ }
+    bench = null;
+  }
+});
 
 const toBuf = (d) => (Buffer.isBuffer(d) ? d : d instanceof ArrayBuffer ? Buffer.from(d) : Buffer.from(d.buffer, d.byteOffset, d.byteLength));
 
@@ -333,7 +508,7 @@ ipcMain.handle('enc:start', async (_e, o) => {
   const args = [
     '-hide_banner', '-loglevel', 'error', '-nostdin', '-y',
     '-f', 'rawvideo', '-pix_fmt', 'nv12', '-video_size', `${o.w}x${o.h}`, '-framerate', String(o.fps), '-i', 'pipe:0',
-    '-c:v', o.ffCodec, ...nvencArgs(o),
+    '-c:v', o.ffCodec, ...encoderArgs(o),
     '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv',
     '-f', 'matroska', vPath,
   ];
@@ -356,7 +531,7 @@ ipcMain.handle('enc:start', async (_e, o) => {
       resolve(code);
     });
   });
-  // Detect immediate failures (e.g. no NVENC session available) before declaring success.
+  // Detect immediate failures (e.g. no encoder session available) before declaring success.
   const alive = await Promise.race([new Promise((r) => setTimeout(() => r(true), 450)), s.exited.then(() => false)]);
   if (!alive) {
     try { s.audio.destroy(); fs.unlink(aPath, () => {}); fs.unlink(vPath, () => {}); } catch { /* ignore */ }
@@ -481,7 +656,7 @@ function streamStatus(s, phase, extra = {}) {
 function streamArgs(s) {
   const o = s.o;
   const br = Math.max(500, Math.round(o.bitrate));
-  const gop = String(Math.max(1, Math.round(o.outFps * 2))); // 2 s keyframe interval (Twitch/YouTube/Kick requirement)
+  // Keyframes every 2 s (Twitch/YouTube/Kick requirement) are set by encoderArgs({ keyint: 2 }).
   const a = [
     '-hide_banner', '-loglevel', 'warning', '-nostdin', '-y',
     '-use_wallclock_as_timestamps', '1', '-thread_queue_size', '64',
@@ -494,13 +669,9 @@ function streamArgs(s) {
   if (o.outW !== o.w || o.outH !== o.h) filters.push(`scale=${o.outW}:${o.outH}:flags=bilinear`);
   if (filters.length) a.push('-vf', filters.join(','));
   a.push('-fps_mode', 'cfr', '-r', String(o.outFps));
-  if (o.encoder === 'nvenc') {
-    a.push('-c:v', 'h264_nvenc', '-preset', 'p5', '-tune', 'hq', '-rc', 'cbr', '-b:v', `${br}k`, '-maxrate', `${br}k`, '-bufsize', `${br * 2}k`,
-      '-g', gop, '-bf', '2', '-profile:v', 'high', '-spatial-aq', '1', '-forced-idr', '1');
-  } else {
-    a.push('-c:v', 'libx264', '-preset', 'veryfast', '-b:v', `${br}k`, '-maxrate', `${br}k`, '-bufsize', `${br * 2}k`,
-      '-g', gop, '-keyint_min', gop, '-sc_threshold', '0', '-profile:v', 'high', '-pix_fmt', 'yuv420p');
-  }
+  const ffCodec = { nvenc: 'h264_nvenc', amf: 'h264_amf', qsv: 'h264_qsv' }[o.encoder] || 'libx264';
+  a.push('-c:v', ffCodec, ...encoderArgs({ ffCodec, fps: o.outFps, bitrate: br, keyint: 2, live: true, tune: { preset: o.preset, rc: 'cbr' } }));
+  if (ffCodec === 'libx264') a.push('-pix_fmt', 'yuv420p');
   a.push('-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv');
   a.push('-af', 'aresample=async=1000', '-c:a', 'aac', '-b:a', `${Math.round(o.audioBitrate)}k`, '-ar', '48000', '-ac', '2');
   a.push('-f', 'flv', '-flvflags', 'no_duration_filesize', '-progress', 'pipe:1', '-stats_period', '1', s.url);

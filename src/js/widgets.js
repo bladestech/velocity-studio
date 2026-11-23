@@ -3,19 +3,24 @@ import { h, $ } from './util.js';
 import { icon } from './icons.js';
 
 /* ---------------- Modal ---------------- */
-export function modal({ title, body, buttons, width = 560, onClose }) {
+export function modal({ title, body, buttons, width = 560, onClose, onOpen, dismissible = true, className = '' }) {
   return new Promise((resolve) => {
     const root = $('#modal-root');
     const overlay = h('div', { class: 'modal-overlay' });
-    const box = h('div', { class: 'modal', style: { width: `${width}px` }, role: 'dialog', 'aria-label': title });
+    const box = h('div', { class: `modal ${className}`, style: { width: `${width}px` }, role: 'dialog', 'aria-label': title });
+    let closed = false;
     const close = (val) => {
+      if (closed) return;
+      closed = true;
       document.removeEventListener('keydown', onKey, true);
-      overlay.remove();
+      // Play the exit animation, then detach.
+      overlay.classList.add('closing');
+      setTimeout(() => overlay.remove(), 170);
       if (onClose) onClose();
       resolve(val);
     };
     const head = h('div', { class: 'modal-head' }, h('span', {}, title),
-      h('button', { class: 'icon-btn', title: 'Close', html: icon('close'), onclick: () => close(null) }));
+      dismissible ? h('button', { class: 'icon-btn', title: 'Close', html: icon('close'), onclick: () => close(null) }) : null);
     const foot = h('div', { class: 'modal-foot' });
     for (const b of buttons || []) {
       const btn = h('button', {
@@ -27,11 +32,12 @@ export function modal({ title, body, buttons, width = 560, onClose }) {
       }, b.label);
       foot.append(btn);
     }
-    box.append(head, h('div', { class: 'modal-body' }, body), foot);
+    box.append(head, h('div', { class: 'modal-body' }, body));
+    if (buttons && buttons.length) box.append(foot);
     overlay.append(box);
-    overlay.addEventListener('pointerdown', (e) => { if (e.target === overlay) close(null); });
+    overlay.addEventListener('pointerdown', (e) => { if (dismissible && e.target === overlay) close(null); });
     function onKey(e) {
-      if (e.key === 'Escape') { e.stopPropagation(); close(null); }
+      if (e.key === 'Escape') { e.stopPropagation(); if (dismissible) close(null); }
       else if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'BUTTON' && e.target.tagName !== 'SELECT') {
         const p = foot.querySelector('.btn.primary');
         if (p) { e.preventDefault(); p.click(); }
@@ -41,6 +47,7 @@ export function modal({ title, body, buttons, width = 560, onClose }) {
     root.append(overlay);
     const first = box.querySelector('input:not([type=checkbox]):not([type=color]), textarea, select');
     if (first) { first.focus(); if (first.select && first.tagName === 'INPUT') first.select(); }
+    if (onOpen) onOpen({ close, box, foot });
   });
 }
 
@@ -83,7 +90,12 @@ export function toast(message, { kind = 'info', actions = [], timeout = 5000 } =
 /* ---------------- Context menu ---------------- */
 let ctxEl = null;
 export function closeMenu() {
-  if (ctxEl) { ctxEl.remove(); ctxEl = null; }
+  if (!ctxEl) return;
+  const el = ctxEl;
+  ctxEl = null;
+  el.classList.add('closing');
+  el.style.pointerEvents = 'none';
+  setTimeout(() => el.remove(), 110);
 }
 
 export function contextMenu(x, y, items, { anchorRight = false } = {}) {
@@ -150,5 +162,49 @@ export function checkbox(label, checked, onChange) {
 export function numberInput(value, { min, max, step = 1, onChange } = {}) {
   const el = h('input', { type: 'number', class: 'text-input', value, min, max, step });
   if (onChange) el.addEventListener('input', () => onChange(Number(el.value)));
+  return el;
+}
+
+/**
+ * Segmented control (pill switch with a sliding indicator).
+ * options: [{ value, label, disabled?, title? }]. Returns the element with .value getter/setter.
+ */
+export function segmented(options, value, onChange) {
+  const el = h('div', { class: 'seg', role: 'radiogroup' });
+  const pill = h('span', { class: 'seg-pill', 'aria-hidden': 'true' });
+  el.append(pill);
+  const btns = options.map((o) => {
+    const b = h('button', {
+      type: 'button', class: 'seg-btn', role: 'radio', title: o.title || '', disabled: !!o.disabled,
+      onclick: () => { if (cur !== o.value) { set(o.value); if (onChange) onChange(o.value); } },
+    }, o.label);
+    b.dataset.value = o.value;
+    el.append(b);
+    return b;
+  });
+  let cur = value;
+  const place = () => {
+    const b = btns.find((x) => x.dataset.value === String(cur));
+    if (!b || !b.offsetWidth) { pill.style.opacity = b ? '1' : '0'; return; }
+    pill.style.opacity = '1';
+    pill.style.width = `${b.offsetWidth}px`;
+    pill.style.transform = `translateX(${b.offsetLeft}px)`;
+  };
+  const set = (v) => {
+    cur = v;
+    btns.forEach((b) => { const on = b.dataset.value === String(v); b.classList.toggle('active', on); b.setAttribute('aria-checked', on); });
+    place();
+  };
+  set(value);
+  // Measure once laid out (dialogs mount after creation) and whenever the control resizes.
+  new ResizeObserver(place).observe(el);
+  Object.defineProperty(el, 'value', { get: () => cur, set });
+  return el;
+}
+
+/** Wrapper whose content smoothly expands / collapses (animates grid rows 0fr <-> 1fr). */
+export function collapsible(content, open = true) {
+  const el = h('div', { class: `collapse ${open ? 'open' : ''}` }, h('div', { class: 'collapse-inner' }, content));
+  el.setOpen = (v) => el.classList.toggle('open', !!v);
   return el;
 }

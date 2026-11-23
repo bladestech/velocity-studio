@@ -1,7 +1,7 @@
 // Settings dialog, shortcuts reference and about box.
 import { state, emit, save, DEFAULT_SETTINGS } from './store.js';
 import { h, deepClone, formatName, eventToAccelerator, prettyAccel } from './util.js';
-import { modal, field, select, checkbox, numberInput, toast } from './widgets.js';
+import { modal, field, select, checkbox, numberInput, toast, segmented, collapsible } from './widgets.js';
 import * as recorder from './recorder.js';
 
 import * as compositor from './compositor.js';
@@ -9,6 +9,7 @@ import { resetAll, sync } from './resources.js';
 import { icon } from './icons.js';
 import * as audio from './audio.js';
 import * as stream from './stream.js';
+import { openBenchmark } from './benchmark.js';
 
 let appInfo = null;
 export const setAppInfo = (i) => { appInfo = i; };
@@ -20,12 +21,34 @@ export async function applyHotkeys() {
   }
 }
 
+/** A titled group of fields inside a settings pane. */
+function section(title, ...children) {
+  return h('section', { class: 'set-section' }, h('h3', { class: 'set-title' }, title), ...children);
+}
+
+/** Range slider with a filled track and a live value readout. Returns the wrapper (with .setValue()). */
+function rangeInput({ min, max, step = 1, value, format = String, onChange }) {
+  const input = h('input', { type: 'range', class: 'fader slider', min, max, step });
+  const out = h('span', { class: 'slider-value' });
+  const paint = () => {
+    input.style.setProperty('--fill', `${((Number(input.value) - min) / (max - min)) * 100}%`);
+    out.textContent = format(Number(input.value));
+  };
+  input.addEventListener('input', () => { paint(); if (onChange) onChange(Number(input.value)); });
+  const wrap = h('div', { class: 'slider-row' }, input, out);
+  wrap.setValue = (v) => { input.value = Math.min(max, Math.max(min, Number(v))); paint(); };
+  wrap.setValue(value);
+  return wrap;
+}
+
+let closeSettings = null;
+
 export function openSettings() {
   const d = deepClone(state.settings);
   const locked = recorder.rec.phase !== 'idle' || stream.isActive();
   const encs = recorder.supportedEncoders();
 
-  /* ---- Output ---- */
+  /* ---- Output: file + encoder ---- */
   const pathIn = h('input', { type: 'text', class: 'text-input', value: d.recPath, readonly: true });
   const browse = async () => { const p = await window.api.pickFolder(d.recPath); if (p) { d.recPath = p; pathIn.value = p; } };
   pathIn.addEventListener('click', browse);
@@ -33,35 +56,110 @@ export function openSettings() {
   const fname = h('input', { type: 'text', class: 'text-input', value: d.filename });
   const updPrev = () => { preview.textContent = `Example: ${formatName(fname.value || '%CCYY-%MM-%DD %hh-%mm-%ss')}.${d.container}`; };
   fname.addEventListener('input', () => { d.filename = fname.value; updPrev(); });
-  const contSel = select([{ value: 'mp4', label: 'MP4 (.mp4) — plays everywhere' }, { value: 'mkv', label: 'MKV (.mkv) — crash-safe' }, { value: 'webm', label: 'WebM (.webm)' }], d.container, (v) => { d.container = v; updPrev(); });
-  const encSel = select([{ value: 'auto', label: recorder.hasNvenc() ? 'Automatic (NVENC when available)' : 'Automatic (recommended)' }, ...encs.map((e) => ({ value: e.key, label: e.label }))], d.encoder, (v) => { d.encoder = v; });
-  const brIn = numberInput(d.videoBitrate, { min: 1000, max: 200000, step: 500, onChange: (v) => { d.videoBitrate = v || 1000; } });
-  const nv = d.nvenc;
-  const cqIn = numberInput(nv.cq, { min: 1, max: 51, onChange: (v) => { nv.cq = v || 21; } });
-  const presetSel = select([1, 2, 3, 4, 5, 6, 7].map((n) => ({ value: `p${n}`, label: `P${n}${{ 1: ' — fastest', 4: ' — balanced', 5: ' — high quality (default)', 7: ' — best quality, slowest' }[n] || ''}` })), nv.preset, (v) => { nv.preset = v; });
-  const rcSel = select([
-    { value: 'vbr', label: 'VBR — variable bitrate (recommended)' }, { value: 'cbr', label: 'CBR — constant bitrate' },
-    { value: 'cq', label: 'Constant quality (ignores the bitrate)' },
-  ], nv.rc, (v) => { nv.rc = v; cqIn.disabled = v !== 'cq'; brIn.disabled = v === 'cq'; });
-  cqIn.disabled = nv.rc !== 'cq';
-  brIn.disabled = nv.rc === 'cq';
-  const nvencBox = recorder.hasNvenc() ? h('div', { class: 'nvenc-box' },
-    h('div', { class: 'box-title' }, 'NVIDIA NVENC'),
-    h('div', { class: 'grid2' }, field('Preset', presetSel), field('Rate control', rcSel)),
-    field('Constant-quality level (1–51, lower = better quality, bigger files)', cqIn),
-    h('p', { class: 'note' }, 'Used by the NVENC encoders. Video is encoded on your GPU’s dedicated encoder chip, so it barely affects game / desktop performance.')) : null;
-  const preset = select([
-    { value: '', label: 'Preset…' }, { value: 6000, label: 'Small — 6 Mbps' }, { value: 12000, label: 'Balanced — 12 Mbps' },
-    { value: 16000, label: 'High — 16 Mbps' }, { value: 30000, label: 'Very high — 30 Mbps' }, { value: 60000, label: 'Near-lossless — 60 Mbps' },
-  ], '', (v) => { if (v) { d.videoBitrate = Number(v); brIn.value = v; preset.value = ''; } });
+  const contSel = select([{ value: 'mp4', label: 'MP4 (.mp4), plays everywhere' }, { value: 'mkv', label: 'MKV (.mkv), crash-safe' }, { value: 'webm', label: 'WebM (.webm)' }], d.container, (v) => { d.container = v; updPrev(); syncEncoder(); });
+
+  // Encoder type -> encoder -> preset / rate control. Tuning is kept per family in d.tuning.
+  const byKind = (k) => encs.filter((e) => recorder.kindOf(e) === k);
+  const KIND_ORDER = ['hardware', 'software', 'builtin'];
+  const curEnc = () => (d.encoder === 'auto' ? null : encs.find((e) => e.key === d.encoder));
+  let encType = curEnc() ? recorder.kindOf(curEnc()) : 'auto';
+  const typeSeg = segmented([
+    { value: 'auto', label: 'Automatic' },
+    { value: 'hardware', label: 'Hardware · GPU', disabled: !byKind('hardware').length, title: byKind('hardware').length ? '' : 'No GPU encoder is available on this PC' },
+    { value: 'software', label: 'Software · CPU', disabled: !byKind('software').length },
+    { value: 'builtin', label: 'Built-in', title: 'Chromium’s own encoders (fallback, no ffmpeg needed)' },
+  ], encType, (v) => {
+    encType = v;
+    if (v === 'auto') d.encoder = 'auto';
+    else if (!curEnc() || recorder.kindOf(curEnc()) !== v) d.encoder = (byKind(v)[0] || {}).key || 'auto';
+    fillEncSel();
+    syncEncoder();
+  });
+  const encSel = h('select', { class: 'select' });
+  encSel.addEventListener('change', () => { d.encoder = encSel.value; syncEncoder(); });
+  const fillEncSel = () => {
+    encSel.replaceChildren(...byKind(encType).map((e) => { const o = h('option', { value: e.key }, e.label); o.selected = e.key === d.encoder; return o; }));
+  };
+  fillEncSel();
+  const autoInfo = h('div', { class: 'info-line' });
+
+  const presetSel = h('select', { class: 'select' });
+  presetSel.addEventListener('change', () => { const e = active(); if (e) d.tuning[e.family].preset = presetSel.value; });
+  const rcSeg = segmented([
+    { value: 'vbr', label: 'VBR' }, { value: 'cbr', label: 'CBR' }, { value: 'cq', label: 'Constant quality' },
+  ], 'vbr', (v) => { const e = active(); if (e) d.tuning[e.family].rc = v; syncEncoder(); });
+  const rcHint = h('span', { class: 'field-hint' });
+
+  const brSlider = rangeInput({ min: 2000, max: 80000, step: 500, value: d.videoBitrate, format: (v) => `${(v / 1000).toFixed(1)} Mbps`, onChange: (v) => { d.videoBitrate = v; } });
+  const cqSlider = rangeInput({ min: 10, max: 40, step: 1, value: 22, reverse: true,
+    format: (v) => `${v} · ${v <= 16 ? 'near-lossless' : v <= 20 ? 'very high' : v <= 24 ? 'high' : v <= 30 ? 'medium' : 'small files'}`,
+    onChange: (v) => { const e = active(); if (e) d.tuning[e.family].cq = v; } });
+  const keySel = select([1, 2, 3, 4, 5].map((v) => ({ value: v, label: `${v} s${v === 2 ? ' (default)' : ''}` })), d.keyint || 2, (v) => { d.keyint = Number(v); });
+
+  const encPick = collapsible(field('Encoder', encSel), encType !== 'auto');
+  const tuneBox = collapsible(h('div', {},
+    h('div', { class: 'grid2' }, field('Preset', presetSel), field('Keyframe interval', keySel)),
+    field('Rate control', rcSeg, rcHint)), false);
+  const brBox = collapsible(field('Bitrate', brSlider), true);
+  const cqBox = collapsible(field('Quality level (lower = better quality, bigger files)', cqSlider), false);
+
+  /** Encoder that would actually record with the current draft. */
+  const active = () => {
+    const e = recorder.chooseEncoder(d.encoder, d.container);
+    return e && e.backend === 'ffmpeg' ? e : null;
+  };
+  const RC_HINT = {
+    vbr: 'Variable bitrate around the target. Best quality per MB for recordings.',
+    cbr: 'Constant bitrate. Predictable file size, mostly useful for streaming.',
+    cq: 'Constant quality. The bitrate floats to keep quality steady, so file size depends on the content.',
+  };
+  function syncEncoder() {
+    const chosen = recorder.chooseEncoder(d.encoder, d.container);
+    const e = active();
+    encPick.setOpen(encType !== 'auto');
+    autoInfo.replaceChildren(
+      h('span', { class: 'info-dot' }),
+      chosen ? h('span', {}, encType === 'auto' ? 'Records with ' : 'Using ', h('b', {}, chosen.label), recorder.kindOf(chosen) === 'hardware' ? '. Encoded on your GPU, so it barely affects games.' : recorder.kindOf(chosen) === 'software' ? '. Encoded on your CPU.' : ', Chromium’s built-in encoder.')
+        : h('span', {}, 'No encoder is available for this container.'));
+    tuneBox.setOpen(!!e);
+    if (e) {
+      const t = d.tuning[e.family];
+      presetSel.replaceChildren(...recorder.FAMILIES[e.family].presets.map(([v, l]) => { const o = h('option', { value: v }, l); o.selected = v === t.preset; return o; }));
+      rcSeg.value = t.rc;
+      rcHint.textContent = RC_HINT[t.rc];
+      cqSlider.setValue(t.cq);
+    }
+    const cq = !!e && d.tuning[e.family].rc === 'cq';
+    brBox.setOpen(!cq);
+    cqBox.setOpen(cq);
+  }
+  syncEncoder();
+
+  const b = d.benchmark;
+  const benchInfo = !b ? 'Not run yet on this PC.'
+    : b.skipped || b.kept ? `Skipped${b.gpu ? ` · ${b.gpu}` : ''}.`
+      : `Last run ${new Date(b.at).toLocaleDateString()} on ${b.gpu} at ${b.w}×${b.h} ${b.fps} fps.`;
+  const benchCard = h('div', { class: 'bench-card' },
+    h('span', { class: 'bench-card-ic', html: icon('gauge', 18) }),
+    h('div', { class: 'bench-card-text' }, h('div', { class: 'bench-card-title' }, 'Encoder benchmark'), h('div', { class: 'field-hint' }, `Tests every encoder on this PC and picks the best settings. ${benchInfo}`)),
+    h('button', { class: 'btn', type: 'button', disabled: locked, title: locked ? 'Stop recording and streaming first' : '', onclick: () => {
+      // The benchmark writes settings directly, so close this dialog (discarding the draft) and reopen it after.
+      if (closeSettings) closeSettings(null);
+      openBenchmark({ reason: 'manual' }).then(() => openSettings());
+    } }, b && !b.skipped && !b.kept ? 'Run again' : 'Run benchmark'));
+
   const out = h('div', { class: 'pane' },
-    field('Recording folder', h('div', { class: 'row' }, pathIn, h('button', { class: 'btn', type: 'button', onclick: browse }, 'Browse…'), h('button', { class: 'btn', type: 'button', onclick: () => window.api.openDir(d.recPath) }, 'Open'))),
-    field('Filename format', fname, undefined), preview,
-    h('div', { class: 'grid2' }, field('Container', contSel), field('Video encoder', encSel)),
-    h('div', { class: 'grid2' }, field('Video bitrate (kbps)', brIn), field('Quality preset', preset)),
-    nvencBox,
-    h('p', { class: 'note' }, 'Tokens: %CCYY year · %MM month · %DD day · %hh hour · %mm minute · %ss second. ',
-      'Choosing MP4 with a VP9/VP8 encoder re-encodes to H.264 after recording (needs extra time); MKV and WebM are remuxed instantly. NVENC recordings are muxed in a moment when you stop.'),
+    section('Encoder',
+      field('Encoder type', typeSeg),
+      autoInfo,
+      encPick, tuneBox, brBox, cqBox,
+      locked ? h('p', { class: 'note warn' }, 'Changes apply to the next recording.') : null,
+      benchCard),
+    section('File',
+      field('Recording folder', h('div', { class: 'row tight' }, pathIn, h('button', { class: 'btn', type: 'button', onclick: browse }, 'Browse…'), h('button', { class: 'btn', type: 'button', onclick: () => window.api.openDir(d.recPath) }, 'Open'))),
+      h('div', { class: 'grid2' }, field('Container', contSel), h('div', {}, field('Filename format', fname), preview)),
+      h('p', { class: 'note' }, 'Tokens: %CCYY year · %MM month · %DD day · %hh hour · %mm minute · %ss second. ',
+        'MP4 with a VP9/VP8 encoder is re-encoded to H.264 after recording; everything else is muxed in a moment when you stop.')),
   );
   updPrev();
 
@@ -75,7 +173,7 @@ export function openSettings() {
   const video = h('div', { class: 'pane' },
     h('div', { class: 'grid2' }, field('Output resolution', resSel), field('Frame rate', fpsSel)),
     locked ? h('p', { class: 'note warn' }, 'Stop recording and streaming to change the resolution or frame rate.') : null,
-    h('p', { class: 'note' }, 'Scenes are laid out on a 16:9 canvas and scaled to the output resolution. Higher resolution and frame rate use more CPU/GPU — if the status bar shows fewer fps than selected, lower one of them or the bitrate.'),
+    h('p', { class: 'note' }, 'Scenes are laid out on a 16:9 canvas and scaled to the output resolution. Higher resolution and frame rate use more CPU/GPU. If the status bar shows fewer fps than selected, lower one of them or the bitrate.'),
   );
 
   /* ---- Audio ---- */
@@ -139,7 +237,7 @@ export function openSettings() {
     h('div', { class: 'row' }, h('button', {
       class: 'btn',
       type: 'button',
-      onclick: () => { Object.assign(d, deepClone(DEFAULT_SETTINGS), { recPath: d.recPath }); toast('Settings reset — press Apply to keep.', { kind: 'warn' }); },
+      onclick: () => { Object.assign(d, deepClone(DEFAULT_SETTINGS), { recPath: d.recPath }); toast('Settings reset. Press Apply to keep them.', { kind: 'warn' }); },
     }, 'Reset to defaults')),
   );
 
@@ -167,7 +265,7 @@ export function openSettings() {
     if (sc.service === svc.id && keyDraft[svc.id] === undefined) { keyIn.value = k; keyIn.placeholder = 'Paste your stream key'; }
   };
   const svcSel = select(stream.SERVICES.map((s) => ({ value: s.id, label: s.name })), sc.service, (v) => { sc.service = v; refreshService(); });
-  const secretNote = h('p', { class: 'note' }, 'Your stream key is stored encrypted with Windows (DPAPI) on this PC and never written to the settings file. Anyone with your key can stream to your channel — keep it private and reset it if it leaks.');
+  const secretNote = h('p', { class: 'note' }, 'Your stream key is stored encrypted with Windows (DPAPI) on this PC and never written to the settings file. Anyone with your key can stream to your channel, so keep it private and reset it if it leaks.');
   const rememberCb = checkbox('Remember stream keys on this PC', true, (v) => { remember = v; });
   window.api.secretAvailable().then((ok) => {
     secretOk = ok;
@@ -177,12 +275,17 @@ export function openSettings() {
   const sAudio = select([96, 128, 160, 192, 256].map((v) => ({ value: v, label: `${v} kbps` })), sc.audioBitrate, (v) => { sc.audioBitrate = Number(v); });
   const sHeight = select([{ value: 0, label: 'Same as canvas' }, { value: 1080, label: '1920 × 1080' }, { value: 900, label: '1600 × 900' }, { value: 720, label: '1280 × 720' }, { value: 540, label: '960 × 540' }], sc.height, (v) => { sc.height = Number(v); });
   const sFps = select([{ value: 0, label: 'Same as canvas' }, { value: 60, label: '60 fps' }, { value: 48, label: '48 fps' }, { value: 30, label: '30 fps' }, { value: 24, label: '24 fps' }], sc.fps, (v) => { sc.fps = Number(v); });
+  const hwStream = [['nvenc', 'NVIDIA NVENC H.264', recorder.hasNvencH264()], ['amf', 'AMD AMF H.264', recorder.hasAmfH264()], ['qsv', 'Intel Quick Sync H.264', recorder.hasQsvH264()]].filter((x) => x[2]);
   const sEnc = select([
-    { value: 'auto', label: recorder.hasNvencH264() ? 'Automatic (NVIDIA NVENC)' : 'Automatic (x264, CPU)' },
-    ...(recorder.hasNvencH264() ? [{ value: 'nvenc', label: 'NVIDIA NVENC H.264 (GPU)' }] : []),
-    { value: 'x264', label: 'x264 (CPU, veryfast)' },
-  ], sc.encoder, (v) => { sc.encoder = v; });
-  if (streaming) [sBitrate, sAudio, sHeight, sFps, sEnc].forEach((el) => { el.disabled = true; });
+    { value: 'auto', label: hwStream.length ? `Automatic (${hwStream[0][1]})` : 'Automatic (x264, CPU)' },
+    ...hwStream.map(([v, l]) => ({ value: v, label: `${l} (GPU)` })),
+    { value: 'x264', label: 'x264 (CPU)' },
+  ], sc.encoder, (v) => { sc.encoder = v; syncStreamPreset(); });
+  const sPreset = select(recorder.FAMILIES.x264.presets.slice(0, 5).map(([v, l]) => ({ value: v, label: l })), sc.preset || 'veryfast', (v) => { sc.preset = v; });
+  const sPresetBox = collapsible(field('x264 preset (faster = less CPU, slower = better quality)', sPreset), false);
+  const syncStreamPreset = () => sPresetBox.setOpen(sc.encoder === 'x264' || (sc.encoder === 'auto' && !hwStream.length));
+  syncStreamPreset();
+  if (streaming) [sBitrate, sAudio, sHeight, sFps, sEnc, sPreset].forEach((el) => { el.disabled = true; });
   const streamPane = h('div', { class: 'pane' },
     field('Service', svcSel),
     hint,
@@ -192,8 +295,9 @@ export function openSettings() {
     h('div', { class: 'grid2' }, field('Video bitrate (kbps, CBR)', sBitrate), field('Audio bitrate', sAudio)),
     h('div', { class: 'grid2' }, field('Stream resolution', sHeight), field('Stream frame rate', sFps)),
     h('div', { class: 'grid2' }, field('Encoder', sEnc), h('div', {}, h('div', { class: 'field-label' }, 'Connection'), checkbox('Reconnect automatically', sc.reconnect, (v) => { sc.reconnect = v; }))),
+    sPresetBox,
     streaming ? h('p', { class: 'note warn' }, 'Stop streaming to change bitrate, resolution or encoder.') : null,
-    h('p', { class: 'note' }, 'Keyframes are sent every 2 seconds, as Twitch, YouTube and Kick require. Streaming and recording can run at the same time; with NVENC both share one GPU conversion.'),
+    h('p', { class: 'note' }, 'Keyframes are sent every 2 seconds, as Twitch, YouTube and Kick require. Streaming and recording can run at the same time; with a GPU encoder both share one GPU conversion.'),
   );
   refreshService();
 
@@ -203,8 +307,13 @@ export function openSettings() {
   const buttons = [];
   tabs.forEach(([name, pane], i) => {
     const b = h('button', { class: `tab-btn ${i === 0 ? 'active' : ''}`, type: 'button', onclick: () => {
+      if (b.classList.contains('active')) return;
       buttons.forEach((x) => x.classList.remove('active')); b.classList.add('active');
-      tabs.forEach(([, p]) => { p.style.display = 'none'; }); pane.style.display = '';
+      tabs.forEach(([, p]) => { p.style.display = 'none'; p.classList.remove('pane-in'); });
+      pane.style.display = '';
+      void pane.offsetWidth; // restart the entrance animation
+      pane.classList.add('pane-in');
+      content.scrollTop = 0;
     } }, name);
     buttons.push(b); nav.append(b);
     pane.style.display = i === 0 ? '' : 'none';
@@ -215,6 +324,8 @@ export function openSettings() {
     title: 'Settings',
     width: 760,
     body: h('div', { class: 'settings-layout' }, nav, content),
+    onOpen: ({ close }) => { closeSettings = close; },
+    onClose: () => { closeSettings = null; },
     buttons: [
       { label: 'Cancel', value: null },
       {
@@ -282,7 +393,7 @@ export function openAbout() {
       h('div', { class: 'about-logo' }, h('img', { src: 'icon.png', alt: '' })),
       h('h2', {}, 'Velocity Studio'),
       h('p', {}, `Version ${appInfo ? appInfo.version : '1.0.0'}`),
-      h('p', { class: 'note' }, 'An OBS-style screen recorder and live streamer: scenes, multiple sources, audio mixer, NVENC hardware encoding, RTMP streaming, global hotkeys.')),
+      h('p', { class: 'note' }, 'An OBS-style screen recorder and live streamer: scenes, multiple sources, audio mixer, NVENC / AMF hardware encoding, RTMP streaming, global hotkeys.')),
     buttons: [{ label: 'Close', primary: true, value: 'ok' }],
   });
 }

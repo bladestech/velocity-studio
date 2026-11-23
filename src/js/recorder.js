@@ -1,38 +1,81 @@
 // Recording controller. Two backends:
 //   native  - canvas video + mixed audio -> MediaRecorder (Chromium encoders) -> disk
-//   ffmpeg  - canvas -> GPU NV12 -> ffmpeg (NVIDIA NVENC) + Opus audio file -> muxed on stop
+//   ffmpeg  - canvas -> GPU NV12 -> ffmpeg (NVENC / AMF / QSV hardware, or x264 / x265 software)
+//             + Opus audio file -> muxed on stop
 import { state, emit } from './store.js';
 import { formatName } from './util.js';
 import * as compositor from './compositor.js';
 import * as audio from './audio.js';
 import * as frames from './frames.js';
 
+/** Encoder families: how each one is tuned (presets are listed best quality last). */
+export const FAMILIES = {
+  nvenc: {
+    name: 'NVIDIA NVENC', kind: 'hardware',
+    presets: [['p1', 'P1 (fastest)'], ['p2', 'P2'], ['p3', 'P3'], ['p4', 'P4 (balanced)'], ['p5', 'P5 (high quality)'], ['p6', 'P6'], ['p7', 'P7 (best quality)']],
+  },
+  amf: {
+    name: 'AMD AMF', kind: 'hardware',
+    presets: [['speed', 'Speed (lowest GPU load)'], ['balanced', 'Balanced'], ['quality', 'Quality']],
+  },
+  qsv: {
+    name: 'Intel Quick Sync', kind: 'hardware',
+    presets: [['veryfast', 'Very fast'], ['faster', 'Faster'], ['fast', 'Fast'], ['medium', 'Medium'], ['slow', 'Slow'], ['slower', 'Slower'], ['veryslow', 'Very slow (best quality)']],
+  },
+  x264: {
+    name: 'x264', kind: 'software',
+    presets: [['ultrafast', 'Ultrafast'], ['superfast', 'Superfast'], ['veryfast', 'Very fast'], ['faster', 'Faster'], ['fast', 'Fast'], ['medium', 'Medium'], ['slow', 'Slow (best quality)']],
+  },
+  x265: {
+    name: 'x265', kind: 'software',
+    presets: [['ultrafast', 'Ultrafast'], ['superfast', 'Superfast'], ['veryfast', 'Very fast'], ['faster', 'Faster'], ['fast', 'Fast'], ['medium', 'Medium (best quality)']],
+  },
+};
+
 export const ENCODERS = [
-  { key: 'nvenc-h264', label: 'NVIDIA NVENC H.264 (GPU)', short: 'NVENC H.264', backend: 'ffmpeg', ffCodec: 'h264_nvenc', codec: 'h264' },
-  { key: 'nvenc-hevc', label: 'NVIDIA NVENC HEVC / H.265 (GPU)', short: 'NVENC HEVC', backend: 'ffmpeg', ffCodec: 'hevc_nvenc', codec: 'hevc' },
-  { key: 'nvenc-av1', label: 'NVIDIA NVENC AV1 (GPU, RTX 40-series)', short: 'NVENC AV1', backend: 'ffmpeg', ffCodec: 'av1_nvenc', codec: 'av1' },
+  { key: 'nvenc-h264', label: 'NVIDIA NVENC H.264', short: 'NVENC H.264', backend: 'ffmpeg', family: 'nvenc', ffCodec: 'h264_nvenc', codec: 'h264' },
+  { key: 'nvenc-hevc', label: 'NVIDIA NVENC HEVC / H.265', short: 'NVENC HEVC', backend: 'ffmpeg', family: 'nvenc', ffCodec: 'hevc_nvenc', codec: 'hevc' },
+  { key: 'nvenc-av1', label: 'NVIDIA NVENC AV1 (RTX 40-series+)', short: 'NVENC AV1', backend: 'ffmpeg', family: 'nvenc', ffCodec: 'av1_nvenc', codec: 'av1' },
+  { key: 'amf-h264', label: 'AMD AMF H.264', short: 'AMF H.264', backend: 'ffmpeg', family: 'amf', ffCodec: 'h264_amf', codec: 'h264' },
+  { key: 'amf-hevc', label: 'AMD AMF HEVC / H.265', short: 'AMF HEVC', backend: 'ffmpeg', family: 'amf', ffCodec: 'hevc_amf', codec: 'hevc' },
+  { key: 'amf-av1', label: 'AMD AMF AV1 (RX 7000-series+)', short: 'AMF AV1', backend: 'ffmpeg', family: 'amf', ffCodec: 'av1_amf', codec: 'av1' },
+  { key: 'qsv-h264', label: 'Intel Quick Sync H.264', short: 'QSV H.264', backend: 'ffmpeg', family: 'qsv', ffCodec: 'h264_qsv', codec: 'h264' },
+  { key: 'qsv-hevc', label: 'Intel Quick Sync HEVC / H.265', short: 'QSV HEVC', backend: 'ffmpeg', family: 'qsv', ffCodec: 'hevc_qsv', codec: 'hevc' },
+  { key: 'qsv-av1', label: 'Intel Quick Sync AV1 (Arc+)', short: 'QSV AV1', backend: 'ffmpeg', family: 'qsv', ffCodec: 'av1_qsv', codec: 'av1' },
+  { key: 'x264', label: 'x264 H.264', short: 'x264', backend: 'ffmpeg', family: 'x264', ffCodec: 'libx264', codec: 'h264' },
+  { key: 'x265', label: 'x265 HEVC / H.265', short: 'x265', backend: 'ffmpeg', family: 'x265', ffCodec: 'libx265', codec: 'hevc' },
   { key: 'h264-mp4', label: 'H.264 (Chromium, MP4)', short: 'H.264', mime: 'video/mp4;codecs=avc1,mp4a.40.2', ext: 'mp4', codec: 'h264' },
   { key: 'h264-webm', label: 'H.264 (Chromium, WebM container)', short: 'H.264', mime: 'video/webm;codecs=h264,opus', ext: 'webm', codec: 'h264' },
   { key: 'vp9', label: 'VP9 (WebM)', short: 'VP9', mime: 'video/webm;codecs=vp9,opus', ext: 'webm', codec: 'vp9' },
   { key: 'vp8', label: 'VP8 (WebM)', short: 'VP8', mime: 'video/webm;codecs=vp8,opus', ext: 'webm', codec: 'vp8' },
   { key: 'av1', label: 'AV1 (Chromium, very high CPU)', short: 'AV1', mime: 'video/webm;codecs=av1,opus', ext: 'webm', codec: 'av1' },
 ];
+/** 'hardware' | 'software' | 'builtin' (Chromium MediaRecorder) */
+export const kindOf = (enc) => (!enc ? null : enc.backend === 'ffmpeg' ? FAMILIES[enc.family].kind : 'builtin');
 
-/** Which hardware encoders the bundled ffmpeg can actually initialise on this machine. */
-const hw = { 'nvenc-h264': false, 'nvenc-hevc': false, 'nvenc-av1': false };
+/** Which ffmpeg encoders actually initialise on this machine (filled by probeHardware). */
+const avail = {};
+let probed = false;
 export async function probeHardware() {
   try {
     const r = await window.api.probeEncoders();
-    hw['nvenc-h264'] = !!r.nvenc.h264;
-    hw['nvenc-hevc'] = !!r.nvenc.hevc;
-    hw['nvenc-av1'] = !!r.nvenc.av1;
-  } catch { /* leave all false */ }
+    for (const e of ENCODERS) if (e.backend === 'ffmpeg') avail[e.key] = !!(r.enc && r.enc[e.ffCodec]);
+  } catch { /* leave all unavailable */ }
+  probed = true;
   emit('settings');
 }
-export const hasNvencH264 = () => hw['nvenc-h264'];
-export const hasNvenc = () => hw['nvenc-h264'] || hw['nvenc-hevc'] || hw['nvenc-av1'];
+export const isProbed = () => probed;
+const anyOf = (fam, codec) => ENCODERS.some((e) => e.family === fam && (!codec || e.codec === codec) && avail[e.key]);
+export const hasNvencH264 = () => anyOf('nvenc', 'h264');
+export const hasNvenc = () => anyOf('nvenc');
+export const hasAmfH264 = () => anyOf('amf', 'h264');
+export const hasAmf = () => anyOf('amf');
+export const hasQsvH264 = () => anyOf('qsv', 'h264');
+export const hasHardware = () => hasNvenc() || hasAmf() || anyOf('qsv');
+/** Tuning ({ preset, rc, cq }) that applies to an encoder, or null for Chromium encoders. */
+export const tuningFor = (enc, s = state.settings) => (!enc || enc.backend !== 'ffmpeg' ? null : s.tuning[enc.family]);
 
-export const supportedEncoders = () => ENCODERS.filter((e) => (e.backend === 'ffmpeg' ? hw[e.key] : MediaRecorder.isTypeSupported(e.mime)));
+export const supportedEncoders = () => ENCODERS.filter((e) => (e.backend === 'ffmpeg' ? avail[e.key] : MediaRecorder.isTypeSupported(e.mime)));
 
 export function chooseEncoder(pref = state.settings.encoder, container = state.settings.container, { nativeOnly = false } = {}) {
   const sup = supportedEncoders().filter((e) => !nativeOnly || e.backend !== 'ffmpeg');
@@ -41,8 +84,8 @@ export function chooseEncoder(pref = state.settings.encoder, container = state.s
     if (e) return e;
   }
   const order = {
-    mp4: ['nvenc-h264', 'h264-mp4', 'h264-webm', 'vp9', 'vp8'],
-    mkv: ['nvenc-h264', 'h264-mp4', 'h264-webm', 'vp9', 'vp8'],
+    mp4: ['nvenc-h264', 'amf-h264', 'qsv-h264', 'x264', 'h264-mp4', 'h264-webm', 'vp9', 'vp8'],
+    mkv: ['nvenc-h264', 'amf-h264', 'qsv-h264', 'x264', 'h264-mp4', 'h264-webm', 'vp9', 'vp8'],
     webm: ['vp9', 'vp8', 'av1'],
   }[container] || ['h264-mp4', 'vp9', 'vp8'];
   for (const k of order) { const e = sup.find((x) => x.key === k); if (e) return e; }
@@ -102,7 +145,7 @@ export async function start() {
     const fb = chooseEncoder('auto', state.settings.container, { nativeOnly: true });
     if (!fb) return r;
     const r2 = await startNative(fb);
-    return r2.ok ? { ...r2, notice: `NVENC unavailable (${r.error}) — recording with ${fb.short} instead.` } : r;
+    return r2.ok ? { ...r2, notice: `${enc.short} unavailable (${r.error}), so recording with ${fb.short} instead.` } : r;
   }
   return startNative(enc);
 }
@@ -157,7 +200,7 @@ async function startFfmpeg(enc) {
   const target = resolveTarget(enc, s.container);
   const r = await window.api.encStart({
     dir: s.recPath, name: formatName(s.filename), target,
-    ffCodec: enc.ffCodec, codec: enc.codec, w, h, fps: s.fps, bitrate: s.videoBitrate, nvenc: s.nvenc,
+    ffCodec: enc.ffCodec, codec: enc.codec, w, h, fps: s.fps, bitrate: s.videoBitrate, family: enc.family, tune: tuningFor(enc), keyint: s.keyint,
   });
   if (!r.ok) return r;
 
@@ -168,7 +211,7 @@ async function startFfmpeg(enc) {
   rec.target = target;
   lastIdx = -1;
 
-  // Audio goes to its own Opus file (cheap), muxed with the NVENC video when recording stops.
+  // Audio goes to its own Opus file (cheap), muxed with the GPU-encoded video when recording stops.
   rec.amr = null;
   rec.audioStartAt = 0;
   const aTrack = audio.mixStream().getAudioTracks()[0];

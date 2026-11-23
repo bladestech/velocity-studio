@@ -7,7 +7,21 @@
   <title>Velocity Studio</title>
   <link rel="stylesheet" href="styles.css">
 </head>
-<body>
+<body class="splash-pending">
+  <!-- Startup animation: the logo's V launches forward and the app opens behind it (js/splash.js). -->
+  <div id="splash" aria-hidden="true">
+    <div class="splash-bg"></div>
+    <div class="splash-stage">
+      <div class="splash-glow"></div>
+      <div class="splash-tile"></div>
+      <div class="splash-flight">
+        <img class="splash-v ghost g3" src="logo-v.png" alt="" draggable="false">
+        <img class="splash-v ghost g2" src="logo-v.png" alt="" draggable="false">
+        <img class="splash-v ghost g1" src="logo-v.png" alt="" draggable="false">
+        <img class="splash-v lead" src="logo-v.png" alt="" draggable="false">
+      </div>
+    </div>
+  </div>
   <header id="titlebar">
     <div class="brand"><img class="brand-icon" src="icon.png" alt=""><span class="brand-name">Velocity Studio</span></div>
     <nav id="menubar" aria-label="Main menu"></nav>
@@ -22,6 +36,14 @@
         <div id="guide-h" class="guide h"></div>
         <div id="sel"></div>
       </div>
+      <div id="stage-empty">
+        <div class="stage-empty-card">
+          <div class="stage-empty-icon" data-icon="display" data-size="24"></div>
+          <div class="stage-empty-title">Your scene is empty</div>
+          <div class="stage-empty-sub">Add a display, window, webcam, image or text to start building your scene.</div>
+          <button class="btn primary" id="btn-empty-add" type="button"><span data-icon="plus"></span><span>Add source</span></button>
+        </div>
+      </div>
       <div id="badges">
         <div id="rec-badge" class="rec-badge"><span class="rec-dot idle" id="rec-dot"></span><span id="rec-label">Ready</span><span id="rec-time">00:00:00</span><span id="rec-size"></span></div>
         <div id="live-badge" class="rec-badge live" hidden><span class="rec-dot live" id="live-dot"></span><span id="live-label">LIVE</span><span id="live-time">00:00:00</span><span id="live-info"></span></div>
@@ -30,7 +52,7 @@
 
     <section id="docks">
       <div class="dock" id="dock-scenes">
-        <div class="dock-head">Scenes</div>
+        <div class="dock-head"><span data-icon="scenes" data-size="14"></span>Scenes</div>
         <div class="dock-body list" id="scene-list"></div>
         <div class="dock-foot">
           <button class="mini-btn" id="btn-add-scene" title="Add scene" data-icon="plus"></button>
@@ -42,7 +64,7 @@
       </div>
 
       <div class="dock" id="dock-sources">
-        <div class="dock-head">Sources</div>
+        <div class="dock-head"><span data-icon="layers" data-size="14"></span>Sources</div>
         <div class="dock-body list" id="source-list"></div>
         <div class="dock-foot">
           <button class="mini-btn" id="btn-add-source" title="Add source" data-icon="plus"></button>
@@ -55,7 +77,7 @@
       </div>
 
       <div class="dock" id="dock-mixer">
-        <div class="dock-head">Audio Mixer</div>
+        <div class="dock-head"><span data-icon="sliders" data-size="14"></span>Audio Mixer</div>
         <div class="dock-body" id="mixer-list"></div>
         <div class="dock-foot">
           <button class="mini-btn" id="btn-add-audio" title="Add audio channel" data-icon="plus"></button>
@@ -64,18 +86,17 @@
       </div>
 
       <div class="dock" id="dock-controls">
-        <div class="dock-head">Controls</div>
+        <div class="dock-head"><span data-icon="record" data-size="14"></span>Controls</div>
         <div class="dock-body controls">
           <button class="btn big stream" id="btn-stream"></button>
           <button class="btn big rec" id="btn-record"></button>
-          <button class="btn" id="btn-pause" disabled></button>
-          <div class="btn-row">
-            <button class="btn" id="btn-shot" title="Take screenshot"><span data-icon="shot"></span><span>Screenshot</span></button>
-            <button class="btn" id="btn-folder" title="Open recordings folder"><span data-icon="folder"></span><span>Recordings</span></button>
-          </div>
-          <div class="btn-row">
-            <button class="btn" id="btn-settings"><span data-icon="gear"></span><span>Settings</span></button>
-            <button class="btn" id="btn-exit"><span data-icon="exit"></span><span>Exit</span></button>
+          <button class="btn wide" id="btn-pause" disabled></button>
+          <div class="controls-sep"></div>
+          <div class="tile-grid">
+            <button class="btn" id="btn-shot" title="Take screenshot"><span data-icon="shot" data-size="17"></span><span>Screenshot</span></button>
+            <button class="btn" id="btn-folder" title="Open recordings folder"><span data-icon="folder" data-size="17"></span><span>Recordings</span></button>
+            <button class="btn" id="btn-settings" title="Settings"><span data-icon="gear" data-size="17"></span><span>Settings</span></button>
+            <button class="btn" id="btn-exit" title="Exit Velocity Studio"><span data-icon="exit" data-size="17"></span><span>Exit</span></button>
           </div>
         </div>
       </div>

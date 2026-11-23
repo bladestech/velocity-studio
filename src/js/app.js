@@ -11,6 +11,8 @@ import * as stream from './stream.js';
 import { fitWhenReady } from './actions.js';
 import { setAppInfo, applyHotkeys } from './settings.js';
 import { toast } from './widgets.js';
+import * as splash from './splash.js';
+import { maybeRunOnStartup } from './benchmark.js';
 
 /** Taskbar badge (red = recording, amber = paused, cyan = live) and a matching window title. */
 function reportActivity() {
@@ -22,7 +24,7 @@ function reportActivity() {
   else if (rec === 'paused') tags.push('❚❚ Paused');
   else if (rec === 'processing') tags.push('Saving…');
   if (live) tags.push('LIVE');
-  document.title = tags.length ? `${tags.join(' · ')} — Velocity Studio` : 'Velocity Studio';
+  document.title = tags.length ? `${tags.join(' · ')} · Velocity Studio` : 'Velocity Studio';
 }
 
 async function boot() {
@@ -69,7 +71,7 @@ async function boot() {
   on('streaming', (e) => {
     const d = e.detail;
     if (d.phase === 'idle' && d.error) toast(`Stream stopped: ${d.error}`, { kind: 'error', timeout: 12000 });
-    if (d.phase === 'reconnecting' && !announcedReconnect) { announcedReconnect = true; toast('Connection to the streaming server was lost — trying to reconnect…', { kind: 'warn', timeout: 6000 }); }
+    if (d.phase === 'reconnecting' && !announcedReconnect) { announcedReconnect = true; toast('Lost the connection to the streaming server. Trying to reconnect…', { kind: 'warn', timeout: 6000 }); }
     if (d.phase === 'live' || d.phase === 'idle') announcedReconnect = false;
     window.api.setBusy(recorder.rec.phase !== 'idle' || d.phase !== 'idle');
     reportActivity();
@@ -85,8 +87,10 @@ async function boot() {
   on('recording', (e) => { window.api.setBusy(e.detail.phase !== 'idle' || stream.isActive()); reportActivity(); });
 
   if (!recorder.supportedEncoders().length) toast('No supported video encoder found in this build.', { kind: 'error', timeout: 0 });
-  if (!info.ffmpeg) toast('ffmpeg is missing — recordings stay in their native format (still playable).', { kind: 'warn', timeout: 8000 });
+  if (!info.ffmpeg) toast('ffmpeg is missing, so recordings stay in their native format (still playable).', { kind: 'warn', timeout: 8000 });
 
+  // First launch (or a new graphics card): offer the encoder benchmark once the intro has played.
+  splash.finish({ instant: !!info.selftest }).then(() => maybeRunOnStartup()).catch(() => {});
   if (info.selftest) runSelfTest();
 }
 
@@ -115,5 +119,6 @@ async function runSelfTest() {
 
 boot().catch((err) => {
   console.error(err);
+  splash.finish({ instant: true });
   document.body.insertAdjacentHTML('beforeend', `<pre style="position:fixed;inset:40px;color:#ff8a80;background:#000;padding:16px;overflow:auto">Startup error:\n${String(err && err.stack || err)}</pre>`);
 });

@@ -109,7 +109,7 @@ export function setSource(cfg, value) {
 export async function sourceOptions() {
   const inputs = await listInputs();
   return [
-    { value: SYSTEM_AUDIO, label: 'System audio — everything you hear (loopback)' },
+    { value: SYSTEM_AUDIO, label: 'System audio (everything you hear, loopback)' },
     { value: 'default', label: 'Default microphone' },
     ...inputs.filter((d) => d.id !== 'default').map((d) => ({ value: d.id, label: d.label })),
   ];
