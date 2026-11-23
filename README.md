@@ -1,8 +1,8 @@
-﻿# RecScreen
+﻿# Velocity Studio
 
-An OBS-style screen recorder for Windows, built on Electron.
+An OBS-style screen recorder and live streamer for Windows, built on Electron.
 
-**Run:** double-click `RecScreen.bat` (or `npm start`).
+**Run:** double-click `VelocityStudio.bat` (or `npm start`).
 
 ## Features
 - **Scenes & sources** - display, window, webcam, image, text and colour sources; drag / resize / crop (Alt+drag) / snap in the live preview; per-source opacity, flip, lock, visibility, z-order, undo on delete.
@@ -14,10 +14,10 @@ An OBS-style screen recorder for Windows, built on Electron.
 - **Hides itself** from captures (no infinite mirror), optional minimise-on-record.
 - Keeps recording while minimised or covered by other windows.
 
-Recordings go to `Videos\RecScreen` by default (Settings -> Output).
+Recordings go to `Videos\Velocity Studio` by default (Settings -> Output).
 
 ## Building the installer
-Builds a Windows NSIS installer (`dist\RecScreen Setup <version>.exe`) from the current working folder.
+Builds a Windows NSIS installer (`dist\Velocity Studio Setup <version>.exe`) from the current working folder.
 
 1. Install dependencies (first time only): `npm install`
 2. Bump the version - the installer name and version come from `package.json`, and the build never changes it:
@@ -33,7 +33,7 @@ Builds a Windows NSIS installer (`dist\RecScreen Setup <version>.exe`) from the 
 The installer is a one-click, per-user install (no admin rights needed) and is **unsigned**, so Windows SmartScreen may warn about an unknown publisher. `dist/` is gitignored and previous installers are not cleaned up, so delete old ones by hand if you don't want them.
 
 ## License
-[MIT](LICENSE). RecScreen bundles Electron (MIT) and an ffmpeg build via `ffmpeg-static`; ffmpeg is licensed separately (GPL for the bundled build) - see the ffmpeg project's licensing terms if you redistribute the installer.
+[MIT](LICENSE). Velocity Studio bundles Electron (MIT) and an ffmpeg build via `ffmpeg-static`; ffmpeg is licensed separately (GPL for the bundled build) - see the ffmpeg project's licensing terms if you redistribute the installer.
 
 ## Notes
 - `npm run selftest` records a 5 s clip and exits (used to verify the capture pipeline).

@@ -67,7 +67,7 @@ export async function toggleStreaming() {
 
 export async function quitApp() {
   if (recorder.rec.phase === 'processing') {
-    toast('Finishing your recording — RecScreen will be ready to close in a moment.', { kind: 'warn' });
+    toast('Finishing your recording — Velocity Studio will be ready to close in a moment.', { kind: 'warn' });
     return;
   }
   if (stream.isActive()) await stream.stop();

@@ -1,7 +1,7 @@
 {
-  "name": "recscreen",
-  "version": "1.1.0",
-  "description": "RecScreen - an OBS-style screen recorder",
+  "name": "velocity-studio",
+  "version": "1.0.0",
+  "description": "Velocity Studio - an OBS-style screen recorder and streamer",
   "main": "main.js",
   "author": "Cole",
   "license": "MIT",
@@ -19,8 +19,8 @@
     "ffmpeg-static": "^5.3.0"
   },
   "build": {
-    "appId": "com.recscreen.app",
-    "productName": "RecScreen",
+    "appId": "com.velocitystudio.app",
+    "productName": "Velocity Studio",
     "directories": {
       "output": "dist"
     },

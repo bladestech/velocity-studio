@@ -285,7 +285,7 @@ function setupMenus() {
     ],
     Help: () => [
       { label: 'Keyboard Shortcuts', onClick: openShortcuts },
-      { label: 'About RecScreen', onClick: openAbout },
+      { label: 'About Velocity Studio', onClick: openAbout },
     ],
   };
   const bar = $('#menubar');

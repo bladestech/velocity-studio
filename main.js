@@ -36,8 +36,8 @@ function ffmpegPath() {
 }
 
 function defaultRecDir() {
-  try { return path.join(app.getPath('videos'), 'RecScreen'); }
-  catch { return path.join(os.homedir(), 'Videos', 'RecScreen'); }
+  try { return path.join(app.getPath('videos'), 'Velocity Studio'); }
+  catch { return path.join(os.homedir(), 'Videos', 'Velocity Studio'); }
 }
 
 function createWindow() {
@@ -48,7 +48,7 @@ function createWindow() {
     minHeight: 680,
     show: false,
     backgroundColor: '#16171a',
-    title: 'RecScreen',
+    title: 'Velocity Studio',
     icon: path.join(__dirname, 'src', 'icon.png'),
     titleBarStyle: 'hidden',
     titleBarOverlay: { color: '#1b1c20', symbolColor: '#c9ccd3', height: 36 },
@@ -97,7 +97,7 @@ ipcMain.handle('app:info', () => ({
   defaultRecDir: defaultRecDir(),
   ffmpeg: !!ffmpegPath(),
   selftest: SELFTEST,
-  outDir: SELFTEST && process.env.RECSCREEN_OUT ? process.env.RECSCREEN_OUT : null,
+  outDir: SELFTEST && process.env.VELOCITY_OUT ? process.env.VELOCITY_OUT : null,
   cores: os.cpus().length,
   platform: process.platform,
 }));

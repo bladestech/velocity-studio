@@ -2,7 +2,7 @@ import { uid, debounce, deepClone } from './util.js';
 
 export const BASE_W = 1920;
 export const BASE_H = 1080;
-const KEY = 'recscreen.state.v1';
+const KEY = 'velocity-studio.state.v1';
 
 export const DEFAULT_SETTINGS = {
   recPath: '',

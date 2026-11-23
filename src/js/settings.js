@@ -129,13 +129,13 @@ export function openSettings() {
     return h('div', { class: 'hk-row' }, h('span', {}, label), btn, clear);
   });
   const hotkeys = h('div', { class: 'pane' }, ...hkRows,
-    h('p', { class: 'note' }, 'Hotkeys work globally, even while RecScreen is minimized or another app has focus.'));
+    h('p', { class: 'note' }, 'Hotkeys work globally, even while Velocity Studio is minimized or another app has focus.'));
 
   /* ---- General ---- */
   const general = h('div', { class: 'pane' },
-    checkbox('Hide RecScreen from screen captures', d.hideFromCapture, (v) => { d.hideFromCapture = v; }),
+    checkbox('Hide Velocity Studio from screen captures', d.hideFromCapture, (v) => { d.hideFromCapture = v; }),
     h('p', { class: 'note' }, 'Excludes this window from display/window capture so it never shows up in your recordings (no infinite-mirror effect).'),
-    checkbox('Minimize RecScreen when recording starts', d.minimizeOnRecord, (v) => { d.minimizeOnRecord = v; }),
+    checkbox('Minimize Velocity Studio when recording starts', d.minimizeOnRecord, (v) => { d.minimizeOnRecord = v; }),
     h('p', { class: 'note' }, 'Use the Start/Stop hotkey to control recording while minimized.'),
     h('div', { class: 'row' }, h('button', {
       class: 'btn',
@@ -172,7 +172,7 @@ export function openSettings() {
   const rememberCb = checkbox('Remember stream keys on this PC', true, (v) => { remember = v; });
   window.api.secretAvailable().then((ok) => {
     secretOk = ok;
-    if (!ok) { rememberCb.input.checked = false; rememberCb.input.disabled = true; remember = false; secretNote.textContent = 'Encrypted storage is not available on this system, so your key is kept in memory only and must be re-entered after restarting RecScreen.'; }
+    if (!ok) { rememberCb.input.checked = false; rememberCb.input.disabled = true; remember = false; secretNote.textContent = 'Encrypted storage is not available on this system, so your key is kept in memory only and must be re-entered after restarting Velocity Studio.'; }
   });
   const sBitrate = numberInput(sc.bitrate, { min: 500, max: 60000, step: 250, onChange: (v) => { sc.bitrate = v || 6000; } });
   const sAudio = select([96, 128, 160, 192, 256].map((v) => ({ value: v, label: `${v} kbps` })), sc.audioBitrate, (v) => { sc.audioBitrate = Number(v); });
@@ -277,13 +277,13 @@ export function openShortcuts() {
 
 export function openAbout() {
   modal({
-    title: 'About RecScreen',
+    title: 'About Velocity Studio',
     width: 420,
     body: h('div', { class: 'about' },
-      h('div', { class: 'about-logo', html: icon('record', 40) }),
-      h('h2', {}, 'RecScreen'),
+      h('div', { class: 'about-logo' }, h('img', { src: 'icon.png', alt: '' })),
+      h('h2', {}, 'Velocity Studio'),
       h('p', {}, `Version ${appInfo ? appInfo.version : '1.0.0'}`),
-      h('p', { class: 'note' }, 'An OBS-style screen recorder: scenes, multiple sources, audio mixer, hardware-accelerated H.264, global hotkeys.')),
+      h('p', { class: 'note' }, 'An OBS-style screen recorder and live streamer: scenes, multiple sources, audio mixer, NVENC hardware encoding, RTMP streaming, global hotkeys.')),
     buttons: [{ label: 'Close', primary: true, value: 'ok' }],
   });
 }
