@@ -1,6 +1,7 @@
 // Small UI toolkit: modal dialogs, toasts, context menus, form helpers.
 import { h, $ } from './util.js';
 import { icon } from './icons.js';
+import { staggerMenu, reflowToasts } from './motion.js';
 
 /* ---------------- Modal ---------------- */
 export function modal({ title, body, buttons, width = 560, onClose, onOpen, dismissible = true, className = '' }) {
@@ -81,7 +82,7 @@ export function toast(message, { kind = 'info', actions = [], timeout = 5000 } =
   }
   el.append(h('button', { class: 'toast-x', html: icon('close', 14), onclick: () => remove() }));
   let timer = null;
-  const remove = () => { clearTimeout(timer); el.classList.add('out'); setTimeout(() => el.remove(), 200); };
+  const remove = () => { clearTimeout(timer); el.classList.add('out'); setTimeout(() => reflowToasts(root, () => el.remove()), 200); };
   root.append(el);
   if (timeout) timer = setTimeout(remove, timeout);
   return remove;
@@ -120,6 +121,7 @@ export function contextMenu(x, y, items, { anchorRight = false } = {}) {
     el.append(row);
   }
   document.body.append(el);
+  staggerMenu(el);
   const r = el.getBoundingClientRect();
   let px = anchorRight ? x - r.width : x;
   let py = y;
