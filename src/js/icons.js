@@ -36,6 +36,7 @@ const P = {
   scenes: '<rect x="3" y="5" width="18" height="13" rx="2"/><path d="M8 21h8"/>',
   'panel-left': '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9.5 4v16"/>',
   'panel-right': '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14.5 4v16"/>',
+  keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"/>',
 };
 
 export function icon(name, size = 16) {
