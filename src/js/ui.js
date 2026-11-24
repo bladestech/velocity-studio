@@ -2,7 +2,7 @@
 import { state, on, activeScene, selectedItem } from './store.js';
 import { $, h, fmtTime, fmtBytes } from './util.js';
 import { icon } from './icons.js';
-import { contextMenu, closeMenu } from './widgets.js';
+import { contextMenu, closeMenu, initNotifications } from './widgets.js';
 import { KINDS, kindInfo } from './source-dialog.js';
 import * as A from './actions.js';
 import * as audio from './audio.js';
@@ -13,6 +13,7 @@ import * as stream from './stream.js';
 import { getRes } from './resources.js';
 import { openSettings, openShortcuts, openAbout } from './settings.js';
 import { initVBounce } from './vbounce.js';
+import { initCompress } from './compress.js';
 import { flipList, swapHTML, reduced } from './motion.js';
 
 function countPop(el, text) {
@@ -406,6 +407,8 @@ export function init() {
   setupMenus();
   setupPanels();
   initVBounce();
+  initCompress();
+  initNotifications();
   requestAnimationFrame(drawMeters);
   pollStats();
   setInterval(pollStats, 1500);

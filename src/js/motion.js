@@ -63,16 +63,3 @@ export function staggerMenu(menu) {
       { duration: 200, easing: SPRING_SOFT, delay: Math.min(i++ * 16, 140), fill: 'backwards' });
   }
 }
-
-/** After a toast is removed, glide the remaining stack into place. */
-export function reflowToasts(root, removeEl) {
-  const sibs = [...root.children].filter((c) => c !== removeEl);
-  const before = sibs.map((c) => c.getBoundingClientRect());
-  removeEl();
-  if (reduced) return;
-  sibs.forEach((c, i) => {
-    const dy = before[i].top - c.getBoundingClientRect().top;
-    if (Math.abs(dy) > 0.5) c.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }],
-      { duration: 280, easing: SPRING_SOFT });
-  });
-}
