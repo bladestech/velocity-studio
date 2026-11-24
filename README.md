@@ -10,9 +10,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/colebolebole/velocity-studio/releases/latest"><img alt="Version" src="https://img.shields.io/badge/version-1.2.0-33c5e8?style=flat-square"></a>
+  <a href="https://github.com/colebolebole/velocity-studio/releases/latest"><img alt="Version" src="https://img.shields.io/badge/version-1.3.0-33c5e8?style=flat-square"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-2fbf62?style=flat-square"></a>
-  <img alt="Platform: Windows 10/11" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078d4?style=flat-square">
+  <img alt="Platform: Windows 10/11 and Linux" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011%20%C2%B7%20Linux-0078d4?style=flat-square">
   <img alt="Electron 45" src="https://img.shields.io/badge/Electron-45-47848f?style=flat-square&logo=electron&logoColor=white">
   <img alt="NVIDIA NVENC" src="https://img.shields.io/badge/NVIDIA-NVENC-76b900?style=flat-square&logo=nvidia&logoColor=white">
   <img alt="AMD AMF" src="https://img.shields.io/badge/AMD-AMF-ed1c24?style=flat-square&logo=amd&logoColor=white">
@@ -34,6 +34,8 @@
 Grab `Velocity Studio Setup <version>.exe` from the [latest release](https://github.com/colebolebole/velocity-studio/releases/latest) and run it (per-user install, no admin rights needed). The installer is **unsigned**, so Windows SmartScreen may warn about an unknown publisher.
 
 On first launch the app offers to download **ffmpeg** (about 120 MB, one time), which it uses for GPU and x264 / x265 encoding. While it downloads, the logo's V fills up as a progress bar. Choosing "Not now" keeps the built-in encoders, and Settings -> Output offers the download later.
+
+**Linux (new in 1.3.0):** the release also has an AppImage, `.deb`, `.rpm`, pacman package and `.tar.gz`; see [Building on Linux](#building-on-linux) for what works there. Install `ffmpeg` from your package manager for GPU / x264 encoding.
 
 **Run from source:** double-click `VelocityStudio.bat` (or `npm start`).
 

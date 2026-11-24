@@ -1,12 +1,16 @@
 {
   "name": "velocity-studio",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Velocity Studio - an OBS-style screen recorder and streamer",
   "main": "main.js",
+  "desktopName": "velocity-studio.desktop",
   "author": "Cole",
   "license": "MIT",
   "homepage": "https://github.com/colebolebole/velocity-studio",
-  "repository": { "type": "git", "url": "https://github.com/colebolebole/velocity-studio.git" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/colebolebole/velocity-studio.git"
+  },
   "private": true,
   "scripts": {
     "ffmpeg": "node scripts/fetch-ffmpeg.js",
@@ -40,15 +44,24 @@
       "icon": "build/icon.ico"
     },
     "linux": {
-      "target": [ "AppImage", "deb", "rpm", "pacman", "tar.gz" ],
+      "target": [
+        "AppImage",
+        "deb",
+        "rpm",
+        "pacman",
+        "tar.gz"
+      ],
       "icon": "src/icon.png",
       "category": "AudioVideo",
       "executableName": "velocity-studio",
+      "syncDesktopName": true,
       "synopsis": "OBS-style screen recorder and live streamer",
       "maintainer": "Cole <colebolebole@users.noreply.github.com>"
     },
     "deb": {
-      "recommends": [ "ffmpeg" ]
+      "recommends": [
+        "ffmpeg"
+      ]
     },
     "nsis": {
       "oneClick": true,
