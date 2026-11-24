@@ -22,37 +22,29 @@
       </div>
     </div>
   </div>
+
   <header id="titlebar">
     <div class="brand"><img class="brand-icon" src="icon.png" alt=""><span class="brand-name">Velocity Studio</span></div>
     <nav id="menubar" aria-label="Main menu"></nav>
-    <div class="title-center" id="title-center"></div>
+    <span class="spacer"></span>
+    <div class="title-actions">
+      <button class="icon-btn panel-toggle" id="btn-toggle-left" title="Show / hide scenes and sources" data-icon="panel-left" data-size="16"></button>
+      <button class="icon-btn panel-toggle" id="btn-toggle-right" title="Show / hide audio mixer" data-icon="panel-right" data-size="16"></button>
+      <span class="title-sep"></span>
+      <button class="icon-btn" id="btn-folder" title="Open recordings folder" data-icon="folder" data-size="16"></button>
+      <button class="icon-btn" id="btn-settings" title="Settings" data-icon="gear" data-size="16"></button>
+      <button class="icon-btn" id="btn-exit" title="Exit Velocity Studio" data-icon="exit" data-size="16"></button>
+    </div>
   </header>
 
   <main id="workspace">
-    <section id="preview-area" aria-label="Preview">
-      <div id="stage">
-        <canvas id="program"></canvas>
-        <div id="guide-v" class="guide v"></div>
-        <div id="guide-h" class="guide h"></div>
-        <div id="sel"></div>
-      </div>
-      <div id="stage-empty">
-        <div class="stage-empty-card">
-          <div class="stage-empty-icon" data-icon="display" data-size="24"></div>
-          <div class="stage-empty-title">Your scene is empty</div>
-          <div class="stage-empty-sub">Add a display, window, webcam, image or text to start building your scene.</div>
-          <button class="btn primary" id="btn-empty-add" type="button"><span data-icon="plus"></span><span>Add source</span></button>
+    <aside class="side" id="side-left">
+      <section class="dock" id="dock-scenes">
+        <div class="dock-head">
+          <span class="dock-ic" data-icon="scenes" data-size="13"></span>
+          <span class="dock-title">Scenes</span>
+          <span class="dock-count" id="scene-count"></span>
         </div>
-      </div>
-      <div id="badges">
-        <div id="rec-badge" class="rec-badge"><span class="rec-dot idle" id="rec-dot"></span><span id="rec-label">Ready</span><span id="rec-time">00:00:00</span><span id="rec-size"></span></div>
-        <div id="live-badge" class="rec-badge live" hidden><span class="rec-dot live" id="live-dot"></span><span id="live-label">LIVE</span><span id="live-time">00:00:00</span><span id="live-info"></span></div>
-      </div>
-    </section>
-
-    <section id="docks">
-      <div class="dock" id="dock-scenes">
-        <div class="dock-head"><span data-icon="scenes" data-size="14"></span>Scenes</div>
         <div class="dock-body list" id="scene-list"></div>
         <div class="dock-foot">
           <button class="mini-btn" id="btn-add-scene" title="Add scene" data-icon="plus"></button>
@@ -61,10 +53,14 @@
           <button class="mini-btn" id="btn-up-scene" title="Move up" data-icon="up"></button>
           <button class="mini-btn" id="btn-down-scene" title="Move down" data-icon="down"></button>
         </div>
-      </div>
+      </section>
 
-      <div class="dock" id="dock-sources">
-        <div class="dock-head"><span data-icon="layers" data-size="14"></span>Sources</div>
+      <section class="dock" id="dock-sources">
+        <div class="dock-head">
+          <span class="dock-ic" data-icon="layers" data-size="13"></span>
+          <span class="dock-title">Sources</span>
+          <span class="dock-count" id="source-count"></span>
+        </div>
         <div class="dock-body list" id="source-list"></div>
         <div class="dock-foot">
           <button class="mini-btn" id="btn-add-source" title="Add source" data-icon="plus"></button>
@@ -74,33 +70,57 @@
           <button class="mini-btn" id="btn-up-source" title="Move up" data-icon="up"></button>
           <button class="mini-btn" id="btn-down-source" title="Move down" data-icon="down"></button>
         </div>
-      </div>
+      </section>
+    </aside>
 
-      <div class="dock" id="dock-mixer">
-        <div class="dock-head"><span data-icon="sliders" data-size="14"></span>Audio Mixer</div>
+    <section id="preview-area" aria-label="Preview">
+      <div id="stage">
+        <canvas id="program"></canvas>
+        <div id="guide-v" class="guide v"></div>
+        <div id="guide-h" class="guide h"></div>
+        <div id="sel"></div>
+      </div>
+      <div id="v-bounce" aria-hidden="true">
+        <img class="vb-ghost g2" src="logo-v.png" alt="" draggable="false">
+        <img class="vb-ghost g1" src="logo-v.png" alt="" draggable="false">
+        <img class="vb-lead" src="logo-v.png" alt="" draggable="false">
+      </div>
+      <div id="stage-empty">
+        <div class="stage-empty-card">
+          <div class="stage-empty-icon" data-icon="display" data-size="26"></div>
+          <div class="stage-empty-title">Your scene is empty</div>
+          <div class="stage-empty-sub">Add a display, window, webcam, image or text to start building your scene.</div>
+          <button class="btn primary" id="btn-empty-add" type="button"><span data-icon="plus"></span><span>Add source</span></button>
+        </div>
+      </div>
+      <div id="badges">
+        <div id="rec-badge" class="rec-badge"><span class="rec-dot idle" id="rec-dot"></span><span id="rec-label">Ready</span><span id="rec-time">00:00:00</span><span id="rec-size"></span></div>
+        <div id="live-badge" class="rec-badge live" hidden><span class="rec-dot live" id="live-dot"></span><span id="live-label">LIVE</span><span id="live-time">00:00:00</span><span id="live-info"></span></div>
+      </div>
+      <div id="pv-chip" aria-hidden="true"></div>
+      <div id="transport" role="toolbar" aria-label="Recording and streaming controls">
+        <button class="btn big stream" id="btn-stream" title="Start / stop streaming"></button>
+        <button class="btn big rec" id="btn-record" title="Start / stop recording"></button>
+        <span class="transport-sep"></span>
+        <button class="btn transport-icon" id="btn-pause" title="Pause / resume recording" disabled></button>
+        <button class="btn transport-icon" id="btn-shot" title="Take screenshot" aria-label="Take screenshot"><span data-icon="shot" data-size="18"></span></button>
+      </div>
+    </section>
+
+    <aside class="side" id="side-right">
+      <section class="dock" id="dock-mixer">
+        <div class="dock-head">
+          <span class="dock-ic" data-icon="sliders" data-size="13"></span>
+          <span class="dock-title">Audio Mixer</span>
+          <span class="dock-count" id="mixer-count"></span>
+        </div>
         <div class="dock-body" id="mixer-list"></div>
         <div class="dock-foot">
           <button class="mini-btn" id="btn-add-audio" title="Add audio channel" data-icon="plus"></button>
           <span class="foot-hint">Double-click a fader to reset</span>
         </div>
-      </div>
-
-      <div class="dock" id="dock-controls">
-        <div class="dock-head"><span data-icon="record" data-size="14"></span>Controls</div>
-        <div class="dock-body controls">
-          <button class="btn big stream" id="btn-stream"></button>
-          <button class="btn big rec" id="btn-record"></button>
-          <button class="btn wide" id="btn-pause" disabled></button>
-          <div class="controls-sep"></div>
-          <div class="tile-grid">
-            <button class="btn" id="btn-shot" title="Take screenshot"><span data-icon="shot" data-size="17"></span><span>Screenshot</span></button>
-            <button class="btn" id="btn-folder" title="Open recordings folder"><span data-icon="folder" data-size="17"></span><span>Recordings</span></button>
-            <button class="btn" id="btn-settings" title="Settings"><span data-icon="gear" data-size="17"></span><span>Settings</span></button>
-            <button class="btn" id="btn-exit" title="Exit Velocity Studio"><span data-icon="exit" data-size="17"></span><span>Exit</span></button>
-          </div>
-        </div>
-      </div>
-    </section>
+      </section>
+    </aside>
   </main>
 
   <footer id="statusbar">
