@@ -12,10 +12,23 @@ import * as cmd from './commands.js';
 import * as stream from './stream.js';
 import { getRes } from './resources.js';
 import { openSettings, openShortcuts, openAbout } from './settings.js';
+import { initVBounce } from './vbounce.js';
+
+const stagger = (el, i) => { el.classList.add('row-in'); el.style.animationDelay = `${Math.min(i * 26, 220)}ms`; };
+function countPop(el, text) {
+  if (el.textContent === text) return;
+  el.textContent = text;
+  el.classList.remove('pop');
+  void el.offsetWidth;
+  el.classList.add('pop');
+}
+const prettyKey = (k) => (k || '').replace('CommandOrControl', 'Ctrl').replace('Control', 'Ctrl').replace('Command', 'Cmd');
+const keyHint = (k) => (k ? `<kbd>${prettyKey(k)}</kbd>` : '');
 
 /* ===================== Scenes dock ===================== */
 function renderScenes() {
   const list = $('#scene-list');
+  countPop($('#scene-count'), String(state.scenes.length));
   list.replaceChildren();
   for (const sc of state.scenes) {
     const row = h('div', {
@@ -33,6 +46,7 @@ function renderScenes() {
         ]);
       },
     }, h('span', { class: 'row-label' }, sc.name), h('span', { class: 'row-badge' }, String(sc.items.length)));
+    stagger(row, list.children.length);
     list.append(row);
   }
 }
@@ -41,6 +55,7 @@ function renderScenes() {
 function renderSources() {
   const list = $('#source-list');
   const sc = activeScene();
+  countPop($('#source-count'), sc && sc.items.length ? String(sc.items.length) : '');
   list.replaceChildren();
   const emptyStage = $('#stage-empty');
   if (emptyStage) emptyStage.classList.toggle('show', !sc || !sc.items.length);
@@ -64,6 +79,7 @@ function renderSources() {
     err ? h('span', { class: 'row-warn', title: res.error, html: '!' }) : null,
     h('button', { class: `mini-btn ${it.visible ? '' : 'off'}`, title: it.visible ? 'Hide' : 'Show', html: icon(it.visible ? 'eye' : 'eyeoff', 15), onclick: (e) => { e.stopPropagation(); A.toggleVisible(it); } }),
     h('button', { class: `mini-btn ${it.locked ? 'on' : 'off'}`, title: it.locked ? 'Unlock' : 'Lock', html: icon(it.locked ? 'lock' : 'unlock', 15), onclick: (e) => { e.stopPropagation(); A.toggleLock(it); } }));
+    stagger(row, list.children.length);
     list.append(row);
   }
 }
@@ -111,6 +127,7 @@ const meters = new Map(); // channel id -> { canvas, dbEl, row }
 
 function renderMixer() {
   const list = $('#mixer-list');
+  countPop($('#mixer-count'), state.audio.length ? String(state.audio.length) : '');
   list.replaceChildren();
   meters.clear();
   for (const ch of state.audio) {
@@ -145,6 +162,8 @@ function renderMixer() {
       statusEl,
       canvas,
       h('div', { class: 'ch-ctrl' }, muteBtn, slider, gear));
+    row.classList.add('row-in');
+    row.style.animationDelay = `${Math.min(list.children.length * 40, 240)}ms`;
     list.append(row);
     meters.set(ch.id, { canvas, row, cfg: ch, statusEl, err: null });
   }
@@ -202,7 +221,7 @@ function updateControls(detail = {}) {
   recBtn.classList.toggle('recording', phase === 'recording' || phase === 'paused');
   recBtn.disabled = busy;
   if (busy) recBtn.innerHTML = `<span class="spin"></span><span>Processing ${detail.pct != null ? `${detail.pct}%` : '…'}</span>`;
-  else recBtn.innerHTML = (phase === 'idle' ? icon('record', 18) : icon('stop', 18)) + `<span>${phase === 'idle' ? 'Start Recording' : 'Stop Recording'}</span>`;
+  else recBtn.innerHTML = (phase === 'idle' ? icon('record', 18) : icon('stop', 18)) + `<span>${phase === 'idle' ? 'Start Recording' : 'Stop Recording'}</span>` + keyHint(state.settings.hotkeys.record);
   pauseBtn.disabled = !(phase === 'recording' || phase === 'paused');
   pauseBtn.innerHTML = (phase === 'paused' ? icon('play', 16) : icon('pause', 16)) + `<span>${phase === 'paused' ? 'Resume Recording' : 'Pause Recording'}</span>`;
   $('#rec-dot').className = `rec-dot ${phase}`;
@@ -223,7 +242,7 @@ function updateStreamControls() {
     idle: 'Start Streaming', connecting: 'Connecting… (cancel)', live: 'Stop Streaming',
     reconnecting: `Reconnecting… (${stream.st.attempt})`, stopping: 'Stopping…',
   }[phase];
-  btn.innerHTML = (phase === 'idle' || busy ? icon('stream', 18) : icon('stop', 18)) + `<span>${label}</span>`;
+  btn.innerHTML = (phase === 'idle' || busy ? icon('stream', 18) : icon('stop', 18)) + `<span>${label}</span>` + (phase === 'idle' ? keyHint(state.settings.hotkeys.stream) : '');
   $('#live-badge').hidden = phase === 'idle';
   $('#live-label').textContent = live ? 'LIVE' : phase === 'reconnecting' ? 'RECONNECTING' : phase === 'stopping' ? 'STOPPING' : 'CONNECTING';
   $('#live-dot').className = `rec-dot ${phase === 'reconnecting' ? 'reconnecting' : 'live'}`;
@@ -247,6 +266,7 @@ function renderStatus() {
   $('#rec-time').textContent = fmtTime(recorder.elapsed());
   $('#rec-size').textContent = active ? `${fmtBytes(recorder.rec.bytes)}${recorder.rec.dropped ? ` · ${recorder.rec.dropped} dropped` : ''}` : '';
   const sz = compositor.getSize();
+  $('#pv-chip').textContent = `${sz.w}×${sz.h} · ${state.settings.fps} fps`;
   $('#st-res').textContent = `${sz.w}×${sz.h} @ ${state.settings.fps}`;
   $('#st-fps').textContent = `${compositor.getFps().toFixed(1)} fps`;
   $('#st-cpu').textContent = `CPU ${lastStats.cpu.toFixed(1)}%`;
@@ -305,6 +325,26 @@ function setupMenus() {
   }, true);
 }
 
+/* ===================== Side panel toggles ===================== */
+function setupPanels() {
+  for (const p of [
+    { btn: '#btn-toggle-left', cls: 'left-collapsed', key: 'panelLeftCollapsed' },
+    { btn: '#btn-toggle-right', cls: 'right-collapsed', key: 'panelRightCollapsed' },
+  ]) {
+    const btn = $(p.btn);
+    const apply = (collapsed) => {
+      document.body.classList.toggle(p.cls, collapsed);
+      btn.classList.toggle('on', !collapsed);
+    };
+    apply(localStorage.getItem(p.key) === '1');
+    btn.onclick = () => {
+      const collapsed = !document.body.classList.contains(p.cls);
+      apply(collapsed);
+      localStorage.setItem(p.key, collapsed ? '1' : '0');
+    };
+  }
+}
+
 /* ===================== Init ===================== */
 export function init() {
   // static button wiring
@@ -334,11 +374,14 @@ export function init() {
   on('audio', renderMixer);
   on('recording', (e) => updateControls(e.detail));
   on('streaming', updateStreamControls);
+  on('settings', () => { updateControls(); updateStreamControls(); });
   window.api.onRecProgress((d) => updateControls({ pct: d.pct }));
   on('itemmenu', (e) => itemMenu(e.detail.item, e.detail.x, e.detail.y));
 
   renderScenes(); renderSources(); renderMixer(); updateControls(); updateStreamControls();
   setupMenus();
+  setupPanels();
+  initVBounce();
   requestAnimationFrame(drawMeters);
   pollStats();
   setInterval(pollStats, 1500);

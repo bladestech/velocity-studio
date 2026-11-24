@@ -7,6 +7,7 @@
 // (6.1.1), which main.js then uses for those encoders only. If it doesn't rescue any encoder, it is removed.
 import { state, save } from './store.js';
 import { h } from './util.js';
+import { icon } from './icons.js';
 import { modal, toast } from './widgets.js';
 import { createVLoader } from './vloader.js';
 import * as recorder from './recorder.js';
@@ -26,17 +27,19 @@ async function installFlow(ui) {
     let lastT = 0, lastB = 0, speed = 0;
     ui.loader.setBusy(false);
     ui.status(title, `0 of ${MB(build.size)} MB`);
+    ui.progress?.(0);
     const off = window.api.onFfmpegProgress((d) => {
       if (d.which !== which) return;
       if (d.phase === 'download') {
         const total = d.total || build.size;
         ui.loader.setProgress(d.got / total);
+        ui.progress?.(d.got / total);
         const now = performance.now();
         if (lastT && now - lastT > 400) { const s = ((d.got - lastB) / (now - lastT)) * 1000; speed = speed ? speed * 0.7 + s * 0.3 : s; lastT = now; lastB = d.got; }
         if (!lastT) { lastT = now; lastB = d.got; }
         ui.status(title, `${MB(d.got)} of ${MB(total)} MB${speed ? ` · ${MB(speed)} MB/s` : ''}`);
       } else if (d.phase === 'verify') {
-        ui.loader.setProgress(1); ui.loader.setBusy(true); ui.onCancelable(null);
+        ui.loader.setProgress(1); ui.progress?.(1); ui.loader.setBusy(true); ui.onCancelable(null);
         ui.status('Verifying the download…', 'Checking it matches the published checksum');
       } else if (d.phase === 'extract') {
         ui.status('Unpacking…', build.label);
@@ -59,6 +62,7 @@ async function installFlow(ui) {
   if (recorder.gpusMissingEncoder(gpu).length && !st.legacy) {
     ui.loader.setBusy(false);
     ui.loader.setProgress(0); // drain, then refill for the second download
+    ui.progress?.(0);
     await sleep(700);
     const r = await run('legacy', 'Getting the compatibility build for your graphics driver');
     if (r.ok) {
@@ -106,6 +110,8 @@ export async function setupOnStartup() {
   };
   const title = h('div', { class: 'setup-title' });
   const detail = h('div', { class: 'setup-detail' });
+  const bar = h('div', { class: 'setup-progress' }, h('span'));
+  const setBar = (p) => { bar.firstChild.style.transform = `scaleX(${Math.max(0, Math.min(1, p))})`; };
   const cancelBtn = h('button', { class: 'setup-link', type: 'button' }, 'Cancel');
   let cancelFn = null;
   cancelBtn.onclick = () => { if (cancelFn) cancelFn(); };
@@ -114,6 +120,7 @@ export async function setupOnStartup() {
   for (;;) {
     const choice = await new Promise((resolve) => {
       show(
+        h('div', { class: 'setup-kicker' }, h('span', { class: 'setup-kicker-ic', html: icon('refresh', 12) }), 'Setup'),
         h('div', { class: 'setup-title' }, 'One last step'),
         h('p', { class: 'setup-text' }, 'Velocity Studio uses ffmpeg, the free open-source video toolkit, to record and stream with your graphics card. It’s a one-time download.'),
         h('div', { class: 'setup-actions' },
@@ -126,10 +133,11 @@ export async function setupOnStartup() {
       save();
       break;
     }
-    show(title, detail, h('div', { class: 'setup-actions' }, cancelBtn));
+    show(title, detail, bar, h('div', { class: 'setup-actions' }, cancelBtn));
     const r = await installFlow({
       loader,
       status: (t, d) => { title.textContent = t; detail.textContent = d || ''; },
+      progress: setBar,
       onCancelable: (fn) => { cancelFn = fn; cancelBtn.style.visibility = fn ? 'visible' : 'hidden'; },
     });
     if (r.ok) {
@@ -174,7 +182,8 @@ export function installFromSettings() {
   const loader = createVLoader({ className: 'dialog-vl' });
   const title = h('div', { class: 'setup-title' }, 'Preparing…');
   const detail = h('div', { class: 'setup-detail' });
-  const body = h('div', { class: 'ff-dialog' }, h('div', { class: 'ff-dialog-logo' }, loader), title, detail);
+  const bar = h('div', { class: 'setup-progress' }, h('span'));
+  const body = h('div', { class: 'ff-dialog' }, h('div', { class: 'ff-dialog-logo' }, loader), title, detail, bar);
   let ok = false;
   return modal({
     title: 'Download ffmpeg',
@@ -189,6 +198,7 @@ export function installFromSettings() {
       const r = await installFlow({
         loader,
         status: (t, d) => { title.textContent = t; detail.textContent = d || ''; },
+        progress: (p) => { bar.firstChild.style.transform = `scaleX(${Math.max(0, Math.min(1, p))})`; },
         onCancelable: (fn) => { cancel.dataset.fn = fn ? '1' : ''; cancel.disabled = !fn; },
       });
       cancel.disabled = false;

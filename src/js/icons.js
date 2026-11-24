@@ -34,6 +34,8 @@ const P = {
   sliders: '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
   layers: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
   scenes: '<rect x="3" y="5" width="18" height="13" rx="2"/><path d="M8 21h8"/>',
+  'panel-left': '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9.5 4v16"/>',
+  'panel-right': '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14.5 4v16"/>',
 };
 
 export function icon(name, size = 16) {
