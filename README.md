@@ -5,7 +5,7 @@
 <h1 align="center">Velocity Studio</h1>
 
 <p align="center">
-  <b>An OBS-style screen recorder and live streamer for Windows.</b><br>
+  <b>An OBS-inspired (thank you!) screen recorder and live streamer for Windows.</b><br>
   Scenes, an audio mixer, GPU encoding (NVIDIA, AMD and Intel), and one-click streaming to Twitch, YouTube, Kick and more.
 </p>
 
