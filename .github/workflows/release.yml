@@ -1,0 +1,123 @@
+name: Build and release
+
+# Push a version tag (v1.4.0) and this builds the Windows installer and every Linux package, then publishes
+# them all to a GitHub release for that tag. Releasing:
+#
+#   npm version minor            # bumps package.json, commits, creates tag v<version>
+#   git push --follow-tags       # starts this workflow
+#
+# Optional release notes go in .github/release-notes/v<version>.md (otherwise GitHub generates them).
+# Run it by hand (Actions -> Build and release -> Run workflow) to build without publishing; tick
+# "draft_test" to also upload everything to a private DRAFT release named ci-test-draft (delete it afterwards).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      draft_test:
+        description: 'Also upload to a private draft release (ci-test-draft) to test publishing'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Build the NSIS installer
+        run: npm run dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          if-no-files-found: error
+          path: dist/Velocity Studio Setup *.exe
+
+  linux-x64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build AppImage, deb, rpm, pacman and tar.gz
+        run: bash scripts/build-linux.sh --yes --targets all
+
+      - name: Check the packages
+        run: |
+          set -euo pipefail
+          ls -l dist
+          dpkg-deb --info dist/*.deb
+          rpm -qp --info dist/*.rpm
+          # The app binary and the sandbox helper must keep their executable bits.
+          mkdir "$RUNNER_TEMP/t" && tar -xzf dist/*.tar.gz -C "$RUNNER_TEMP/t"
+          test -x "$RUNNER_TEMP"/t/velocity-studio-*/velocity-studio
+          # Start the app under a virtual display; if it is still running after the timeout (exit 124) it launched fine.
+          sudo apt-get install -y xvfb
+          rc=0; timeout 20 xvfb-run -a "$RUNNER_TEMP"/t/velocity-studio-*/velocity-studio --no-sandbox --disable-gpu || rc=$?
+          test "$rc" = 124
+          chmod +x dist/*.AppImage
+          rc=0; timeout 40 xvfb-run -a dist/*.AppImage --appimage-extract-and-run --no-sandbox --disable-gpu || rc=$?
+          test "$rc" = 124
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64
+          if-no-files-found: error
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.rpm
+            dist/*.pacman
+            dist/*.tar.gz
+
+  release:
+    needs: [windows, linux-x64]
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.draft_test)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT_TEST: ${{ github.event_name == 'workflow_dispatch' && inputs.draft_test }}
+        run: |
+          set -euo pipefail
+          extra=()
+          if [ "$DRAFT_TEST" = "true" ]; then
+            tag=ci-test-draft
+            extra+=(--draft --target "$GITHUB_SHA")
+          else
+            tag="$GITHUB_REF_NAME"
+            # The tag has to match package.json, otherwise the installers would carry a different version.
+            version=$(node -p "require('./package.json').version")
+            [ "v$version" = "$tag" ] || { echo "Tag $tag does not match package.json version $version"; exit 1; }
+            case "$tag" in *-*) extra+=(--prerelease) ;; esac
+          fi
+          notes=".github/release-notes/$tag.md"
+          if [ -f "$notes" ]; then extra+=(--notes-file "$notes"); else extra+=(--generate-notes); fi
+
+          cd artifacts
+          ls -l
+          sha256sum -- * > SHA256SUMS.txt
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag exists: replacing its assets"
+            gh release upload "$tag" ./* --clobber
+          else
+            gh release create "$tag" ./* --title "Velocity Studio ${tag#v}" "${extra[@]}"
+          fi

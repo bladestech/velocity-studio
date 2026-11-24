@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/colebolebole/velocity-studio/releases/latest"><img alt="Version" src="https://img.shields.io/badge/version-1.3.0-33c5e8?style=flat-square"></a>
+  <a href="https://github.com/colebolebole/velocity-studio/releases/latest"><img alt="Version" src="https://img.shields.io/github/v/release/colebolebole/velocity-studio?label=version&color=33c5e8&style=flat-square"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-2fbf62?style=flat-square"></a>
   <img alt="Platform: Windows 10/11 and Linux" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011%20%C2%B7%20Linux-0078d4?style=flat-square">
   <img alt="Electron 45" src="https://img.shields.io/badge/Electron-45-47848f?style=flat-square&logo=electron&logoColor=white">
@@ -70,6 +70,19 @@ Builds a Windows NSIS installer (`dist\Velocity Studio Setup <version>.exe`) fro
    ```
 
 The installer is a one-click, per-user install and is **unsigned**. `dist/` is gitignored and previous installers are not cleaned up, so delete old ones by hand if you don't want them.
+
+## Releasing (automatic)
+Pushing a version tag builds and publishes everything: the workflow in `.github/workflows/release.yml` builds the Windows installer and all Linux packages (AppImage, deb, rpm, pacman, tar.gz) on GitHub's runners, checks them, and attaches them plus a `SHA256SUMS.txt` to a GitHub release for that tag.
+
+```bash
+npm version minor        # or patch / major: bumps package.json, commits, creates the tag v<version>
+git push --follow-tags   # starts the build; the release appears when it finishes (about 10 minutes)
+```
+
+- The tag must match `package.json`'s version, otherwise the workflow stops before publishing.
+- Write release notes in `.github/release-notes/v<version>.md` before pushing; without that file GitHub generates them from the commits. A tag with a `-` (for example `v1.4.0-beta.1`) is published as a pre-release.
+- `npm run dist` and `scripts/build-linux.sh` still only build locally and never publish.
+- To build without publishing, run the workflow by hand from the Actions tab; tick `draft_test` to also upload to a private draft release for testing.
 
 ## Building on Linux
 `scripts/build-linux.sh` detects your distro, CPU (x64, arm64, armv7l) and package manager, installs what the build still needs (it shows the command and asks first), then builds the packages with electron-builder into `dist/`:
