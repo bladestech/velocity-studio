@@ -23,7 +23,8 @@ function countPop(el, text) {
   el.classList.add('pop');
 }
 const prettyKey = (k) => (k || '').replace('CommandOrControl', 'Ctrl').replace('Control', 'Ctrl').replace('Command', 'Cmd');
-const keyHint = (k) => (k ? `<kbd>${prettyKey(k)}</kbd>` : '');
+// The hint goes through innerHTML, so escape the (user-configurable) hotkey text.
+const keyHint = (k) => (k ? `<kbd>${prettyKey(k).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)}</kbd>` : '');
 
 /* ===================== Scenes dock ===================== */
 function renderScenes() {
