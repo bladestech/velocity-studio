@@ -17,7 +17,7 @@
     "start": "electron .",
     "selftest": "electron . --selftest",
     "icon": "node scripts/make-ico.js",
-    "dist": "electron-builder --win nsis",
+    "dist": "electron-builder --win nsis --publish never",
     "dist:linux": "bash scripts/build-linux.sh"
   },
   "devDependencies": {
