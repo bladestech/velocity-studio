@@ -58,6 +58,9 @@
       "synopsis": "OBS-style screen recorder and live streamer",
       "maintainer": "Cole <colebolebole@users.noreply.github.com>"
     },
+    "appImage": {
+      "artifactName": "velocity-studio-${version}.AppImage"
+    },
     "deb": {
       "recommends": [
         "ffmpeg"

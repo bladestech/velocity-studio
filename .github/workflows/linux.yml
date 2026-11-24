@@ -30,8 +30,13 @@ jobs:
           # The app binary and the sandbox helper must keep their executable bits.
           mkdir "$RUNNER_TEMP/t" && tar -xzf dist/*.tar.gz -C "$RUNNER_TEMP/t"
           test -x "$RUNNER_TEMP"/t/velocity-studio-*/velocity-studio
+          # Start the app under a virtual display; if it is still running after the timeout (exit 124) it launched fine.
+          sudo apt-get install -y xvfb
+          rc=0; timeout 20 xvfb-run -a "$RUNNER_TEMP"/t/velocity-studio-*/velocity-studio --no-sandbox --disable-gpu || rc=$?
+          test "$rc" = 124
           chmod +x dist/*.AppImage
-          dist/*.AppImage --appimage-extract-and-run --no-sandbox --version
+          rc=0; timeout 40 xvfb-run -a dist/*.AppImage --appimage-extract-and-run --no-sandbox --disable-gpu || rc=$?
+          test "$rc" = 124
 
       - uses: actions/upload-artifact@v4
         with:
