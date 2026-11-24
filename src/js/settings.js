@@ -150,16 +150,24 @@ export function openSettings() {
     } }, b && !b.skipped && !b.kept ? 'Run again' : 'Run benchmark'));
 
   // ffmpeg not downloaded yet (skipped on first launch, or the download failed): offer it here.
+  const ffHint = h('div', { class: 'field-hint' }, 'GPU (NVENC / AMF / Quick Sync) and x264 / x265 encoding need it. Until then, recordings use the built-in encoder.');
+  const ffBtn = h('button', { class: 'btn primary', type: 'button', onclick: () => {
+    if (closeSettings) closeSettings(null);
+    installFromSettings()
+      .then((ok) => (ok && !state.settings.benchmark ? openBenchmark({ reason: 'first-run' }) : null))
+      .then(() => openSettings());
+  } }, 'Download ffmpeg');
   const ffCard = h('div', { class: 'ff-card', hidden: true },
     h('span', { class: 'bench-card-ic', html: icon('folder', 18) }),
-    h('div', { class: 'bench-card-text' }, h('div', { class: 'bench-card-title' }, 'ffmpeg isn’t installed'), h('div', { class: 'field-hint' }, 'GPU (NVENC / AMF / Quick Sync) and x264 / x265 encoding need it. Until then, recordings use the built-in encoder.')),
-    h('button', { class: 'btn primary', type: 'button', onclick: () => {
-      if (closeSettings) closeSettings(null);
-      installFromSettings()
-        .then((ok) => (ok && !state.settings.benchmark ? openBenchmark({ reason: 'first-run' }) : null))
-        .then(() => openSettings());
-    } }, 'Download ffmpeg'));
-  window.api.ffmpegStatus().then((st) => { ffCard.hidden = st.main; }).catch(() => {});
+    h('div', { class: 'bench-card-text' }, h('div', { class: 'bench-card-title' }, 'ffmpeg isn’t installed'), ffHint),
+    ffBtn);
+  window.api.ffmpegStatus().then((st) => {
+    ffCard.hidden = st.main;
+    if (!st.managed) { // Linux: ffmpeg comes from the system package manager
+      ffHint.textContent = 'GPU (NVENC) and x264 / x265 encoding need ffmpeg. Install it with your package manager (for example: sudo apt install ffmpeg), then restart the app. Until then, recordings use the built-in encoder.';
+      ffBtn.hidden = true;
+    }
+  }).catch(() => {});
   const gpuNote = h('p', { class: 'note warn', hidden: true });
   window.api.gpuInfo().then((g) => { const t = driverHint(g); if (t) { gpuNote.textContent = t; gpuNote.hidden = false; } }).catch(() => {});
   const out = h('div', { class: 'pane' },

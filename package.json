@@ -13,7 +13,8 @@
     "start": "electron .",
     "selftest": "electron . --selftest",
     "icon": "node scripts/make-ico.js",
-    "dist": "electron-builder --win nsis"
+    "dist": "electron-builder --win nsis",
+    "dist:linux": "bash scripts/build-linux.sh"
   },
   "devDependencies": {
     "electron": "^45.4.1",
@@ -37,6 +38,17 @@
     "win": {
       "target": "nsis",
       "icon": "build/icon.ico"
+    },
+    "linux": {
+      "target": [ "AppImage", "deb", "rpm", "pacman", "tar.gz" ],
+      "icon": "src/icon.png",
+      "category": "AudioVideo",
+      "executableName": "velocity-studio",
+      "synopsis": "OBS-style screen recorder and live streamer",
+      "maintainer": "Cole <colebolebole@users.noreply.github.com>"
+    },
+    "deb": {
+      "recommends": [ "ffmpeg" ]
     },
     "nsis": {
       "oneClick": true,

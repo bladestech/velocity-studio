@@ -24,6 +24,7 @@
   <a href="https://github.com/colebolebole/velocity-studio/releases/latest"><b>Download</b></a> ·
   <a href="#features">Features</a> ·
   <a href="#building-the-installer">Build</a> ·
+  <a href="#building-on-linux">Linux</a> ·
   <a href="#license">License</a>
 </p>
 
@@ -67,6 +68,29 @@ Builds a Windows NSIS installer (`dist\Velocity Studio Setup <version>.exe`) fro
    ```
 
 The installer is a one-click, per-user install and is **unsigned**. `dist/` is gitignored and previous installers are not cleaned up, so delete old ones by hand if you don't want them.
+
+## Building on Linux
+`scripts/build-linux.sh` detects your distro, CPU (x64, arm64, armv7l) and package manager, installs what the build still needs (it shows the command and asks first), then builds the packages with electron-builder into `dist/`:
+
+```bash
+bash scripts/build-linux.sh            # AppImage + your distro's native package
+bash scripts/build-linux.sh --check    # only show what it detected and would do
+bash scripts/build-linux.sh -t all -y  # AppImage, deb, rpm, pacman and tar.gz, no prompts
+```
+
+| Distro family | Detected from `/etc/os-release` | Native package built |
+| --- | --- | --- |
+| Debian, Ubuntu, Mint, Pop!_OS, Kali ... | `debian` / `ubuntu` | `.deb` |
+| Fedora, RHEL, Rocky, Alma, Nobara ... | `fedora` / `rhel` | `.rpm` |
+| openSUSE, SLES | `suse` | `.rpm` |
+| Arch, Manjaro, EndeavourOS, SteamOS ... | `arch` | `.pacman` |
+| Void, Gentoo, anything else | | `.tar.gz` |
+
+- **Node.js:** the system one is used if it is 22.12 or newer; otherwise a private, SHA-256-verified copy is downloaded into `.build-tools/` (nothing system-wide changes). `--local-node` forces the private copy.
+- **Needs glibc:** Alpine (musl) and NixOS can't run Electron's prebuilt binaries; build in a Debian / Fedora container or distrobox there. On immutable systems (Silverblue, Bazzite) run it inside a toolbox.
+- **arm64 / armv7l hosts:** AppImage and tar.gz work out of the box; deb / rpm / pacman need a system `fpm` (the script tries `gem install fpm`).
+- **Runtime:** the Linux app uses the system `ffmpeg` (`sudo apt install ffmpeg`, `dnf install ffmpeg-free`, `pacman -S ffmpeg` ...) instead of downloading one; set `VELOCITY_FFMPEG=/path/to/ffmpeg` to pick a specific build. Without it only the built-in Chromium encoders are available.
+- **Not the same as Windows:** the Linux build is new and hasn't been run on real Linux hardware yet. System-audio capture, the taskbar indicator, AMD AMF and Intel Quick Sync are Windows-only, and global hotkeys may not work on Wayland. On Ubuntu 24.04+ an AppImage may need `--no-sandbox` because of the AppArmor user-namespace restriction.
 
 ## License
 [MIT](LICENSE). Velocity Studio bundles Electron (MIT). ffmpeg is not included in the installer; the app downloads ffmpeg 9.1 (gyan.dev "essentials" build) and, only if needed, ffmpeg 6.1.1, both GPL v3, with their licenses saved next to them in `%APPDATA%\Velocity Studio\ffmpeg`. See the ffmpeg project's licensing terms if you redistribute them.

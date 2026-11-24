@@ -4,3 +4,4 @@ selftest-*
 *.log
 .claude/
 vendor/
+.build-tools/

@@ -32,8 +32,25 @@ let recSeq = 0;
 
 /* ffmpeg is downloaded on first launch into <userData>/ffmpeg/<version> (see ffmpeg-builds.js). When running
    from source, vendor/ffmpeg(-legacy) from `npm run ffmpeg` is used if the app hasn't downloaded its own copy. */
+const IS_WIN = process.platform === 'win32';
 const ffDir = (which) => path.join(app.getPath('userData'), 'ffmpeg', FFMPEG[which].version);
+
+/* Linux / macOS: the pinned builds are Windows binaries, so use the system's ffmpeg instead
+   (VELOCITY_FFMPEG=/path/to/ffmpeg overrides the lookup). There is no legacy build there. */
+let systemFfmpegCache = null;
+function systemFfmpeg() {
+  if (systemFfmpegCache && fs.existsSync(systemFfmpegCache)) return systemFfmpegCache;
+  const dirs = (process.env.PATH || '').split(path.delimiter)
+    .concat(['/usr/bin', '/usr/local/bin', '/opt/homebrew/bin', '/snap/bin', '/var/lib/flatpak/exports/bin']);
+  const cands = [process.env.VELOCITY_FFMPEG, ...dirs.filter(Boolean).map((d) => path.join(d, 'ffmpeg'))];
+  for (const c of cands) {
+    try { if (c) { fs.accessSync(c, fs.constants.X_OK); if (fs.statSync(c).isFile()) return (systemFfmpegCache = c); } } catch { /* next */ }
+  }
+  return (systemFfmpegCache = null);
+}
+
 function ffExe(which) {
+  if (!IS_WIN) return which === 'main' ? systemFfmpeg() : null;
   if (isInstalled(FFMPEG[which], ffDir(which))) return path.join(ffDir(which), 'ffmpeg.exe');
   if (!app.isPackaged) {
     const dev = path.join(__dirname, 'vendor', which === 'main' ? 'ffmpeg' : 'ffmpeg-legacy', 'ffmpeg.exe');
@@ -359,11 +376,13 @@ let ffInstall = null; // { which, ctrl }
 ipcMain.handle('ffmpeg:status', () => ({
   main: !!ffmpegPath(),
   legacy: !!ffExe('legacy'),
+  managed: IS_WIN, // false: the app doesn't download ffmpeg, it uses the one installed on the system
   builds: Object.fromEntries(Object.entries(FFMPEG).map(([k, b]) => [k, { version: b.version, label: b.label, size: b.size }])),
 }));
 
 ipcMain.handle('ffmpeg:install', async (_e, which) => {
   if (!FFMPEG[which]) return { ok: false, error: 'Unknown build.' };
+  if (!IS_WIN) return { ok: false, error: 'Install ffmpeg with your package manager (for example: sudo apt install ffmpeg), then restart Velocity Studio.' };
   if (ffInstall) return { ok: false, error: 'A download is already running.' };
   const ctrl = new AbortController();
   ffInstall = { which, ctrl };
@@ -938,9 +957,11 @@ ipcMain.on('app:busy', (_e, b) => { busy = !!b; });
 // and an animated progress bar while a recording is being finalised.
 ipcMain.on('app:activity', (_e, a = {}) => {
   if (!win || win.isDestroyed()) return;
-  const o = overlayFor(a.rec, !!a.live);
-  if (o) win.setOverlayIcon(o.icon, o.description);
-  else win.setOverlayIcon(null, '');
+  if (IS_WIN) { // taskbar overlay badges are a Windows feature
+    const o = overlayFor(a.rec, !!a.live);
+    if (o) win.setOverlayIcon(o.icon, o.description);
+    else win.setOverlayIcon(null, '');
+  }
   if (a.rec === 'processing') win.setProgressBar(2, { mode: 'indeterminate' });
   else win.setProgressBar(-1);
 });

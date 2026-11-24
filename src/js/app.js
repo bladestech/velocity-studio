@@ -89,7 +89,8 @@ async function boot() {
 
   if (!recorder.supportedEncoders().length) toast('No supported video encoder found in this build.', { kind: 'error', timeout: 0 });
   // ffmpeg is downloaded on first launch (ffmpeg-setup.js) rather than shipped in the installer.
-  const needSetup = !info.ffmpeg && !info.selftest && !state.settings.ffmpegDeclined;
+  // (Linux uses the system ffmpeg, so there is nothing to download there.)
+  const needSetup = info.platform === 'win32' && !info.ffmpeg && !info.selftest && !state.settings.ffmpegDeclined;
 
   // First launch (or a new graphics card): offer the encoder benchmark once the intro has played.
   (needSetup ? setupOnStartup() : Promise.resolve())
