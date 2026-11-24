@@ -451,6 +451,11 @@ body.is-live:not(.is-recording) #statusbar { color: var(--accent-hi); background
 .text-preview { display: grid; place-items: center; min-height: 80px; padding: 10px; border-radius: 8px; background: repeating-conic-gradient(#0c181d 0 25%, #102229 0 50%) 50% / 16px 16px; border: 1px solid var(--line); overflow: hidden; }
 
 /* settings */
+.settings-modal { height: min(660px, calc(100vh - 60px)); }
+.settings-modal .modal-body { flex: 1; min-height: 0; overflow: hidden; display: flex; }
+.settings-modal .settings-layout { flex: 1; min-height: 0; }
+.settings-modal .tabs-content { max-height: none; }
+.settings-modal .tabs-nav { overflow: auto; }
 .settings-layout { display: grid; grid-template-columns: 190px 1fr; margin: -4px -20px -20px; min-height: 420px; border-top: 1px solid var(--line); }
 .tabs-nav { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 12px 10px; border-right: 1px solid var(--line); background: rgba(0, 0, 0, .12); }
 .tab-ind {
