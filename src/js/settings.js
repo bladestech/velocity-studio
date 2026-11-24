@@ -372,6 +372,7 @@ export function openSettings() {
   modal({
     title: 'Settings',
     width: 820,
+    className: 'settings-modal',
     body: h('div', { class: 'settings-layout' }, nav, content),
     onOpen: ({ close }) => { closeSettings = close; requestAnimationFrame(placeInd); },
     onClose: () => { closeSettings = null; },
